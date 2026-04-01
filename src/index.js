@@ -1195,9 +1195,18 @@ async function fetchOpenAiCompatible(env, signal, prompt, input) {
     };
   }
 
+  const parsed = parseAiJsonResult(content);
+  if (!parsed.ok) {
+    return {
+      ok: false,
+      reason: parsed.reason,
+      publicReason: parsed.publicReason,
+    };
+  }
+
   return {
     ok: true,
-    result: content,
+    result: parsed.result,
   };
 }
 
@@ -1215,6 +1224,30 @@ function extractChatContent(payload) {
   }
 
   return null;
+}
+
+function parseAiJsonResult(content) {
+  try {
+    const parsed = JSON.parse(content);
+    if (!parsed || typeof parsed.result !== "string") {
+      return {
+        ok: false,
+        reason: "ai_json_result_missing",
+        publicReason: "AI JSON result missing",
+      };
+    }
+
+    return {
+      ok: true,
+      result: parsed.result,
+    };
+  } catch {
+    return {
+      ok: false,
+      reason: "ai_json_invalid",
+      publicReason: "AI JSON invalid",
+    };
+  }
 }
 
 async function listRecentErrors(env, limit) {

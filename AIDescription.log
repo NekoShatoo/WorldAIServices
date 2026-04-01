@@ -38,6 +38,8 @@
 AI 呼び出し
 - 既定サンプルは `AI_PROVIDER_MODE=openai-chat`
 - OpenAI 互換時は system に prompt、user に `[zh_CN]本文` を送る
+- OpenAI 互換時の応答本文は JSON 文字列であることを前提とし、`result` だけを翻訳結果として採用する
+- JSON が壊れている、または `result` が無い場合はエラーとして扱う
 - `AI_PROVIDER_MODE=result-json` のときだけ `input: "[zh_CN]本文"` と応答 JSON の `result` を使う
 - `prompt` 自体は KV に保持し、Discord の `/prompt` で更新する
 
