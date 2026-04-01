@@ -73,4 +73,5 @@ Discord 連携
 補足
 - このリポジトリは初期状態で空だったため、Worker 一式を新規作成した
 - 管理操作は HTTP Interactions 化したため、旧来の `x-bot-key` 管理API は廃止した
-- `.dev.vars` は実鍵を入れる前提なので Git 管理から除外し、`.dev.vars.example` はダミー値だけを置く
+- サンプル設定は `wrangler.toml` の `[vars]` に集約した
+- 実運用では秘密値を `wrangler secret put` や Cloudflare Dashboard の Secret に移すことを推奨するが、現状はローカル同期を優先してダミー値を `wrangler.toml` に置いている
