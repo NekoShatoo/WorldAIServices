@@ -115,6 +115,11 @@ export const DISCORD_COMMANDS = [
     ],
   },
   {
+    name: "resetcache",
+    description: "翻訳キャッシュKVを全削除します。",
+    type: 1,
+  },
+  {
     name: "stats",
     description: "当日と当月の翻訳統計を表示します。",
     type: 1,

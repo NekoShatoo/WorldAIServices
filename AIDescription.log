@@ -23,6 +23,7 @@
 - prompt 更新時は `promptVersion` を増やし、旧キャッシュを論理的に分離する
 - キャッシュ未命中時は Durable Object が同一 key の in-flight を 1 本に束ねる
 - 同じ `promptVersion + lang + text` への同時要求は 1 回だけ AI を呼び、残りは同じ結果を待つ
+- `/resetcache` は `cache:` prefix の KV だけを全削除し、設定・統計・エラーログは消さない
 - レート制限は IP 単位、既定 1 分 6 回
 - レート制限は KV の簡易 read-modify-write 実装なので強整合ではない
 - 用途は厳密課金ではなく AI 乱発抑止なので、この近似精度を許容する
@@ -63,6 +64,7 @@ Discord 連携
 - `/errors [limit]`
 - `/ping`
 - `/simulate lang:<code> text:<本文>`
+- `/resetcache`
 - `/stats`
 
 権限制御

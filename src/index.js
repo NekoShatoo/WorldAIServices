@@ -363,6 +363,14 @@ async function handleDiscordApplicationCommand(interaction, env, ctx) {
     return discordMessageResponse(buildDiscordSimulationMessage(result), false);
   }
 
+  if (commandName === "resetcache") {
+    const userId = interaction?.member?.user?.id ?? interaction?.user?.id ?? "";
+    ctx.waitUntil(
+      resetTranslationCache(env, userId),
+    );
+    return discordMessageResponse("cache reset started", false);
+  }
+
   if (commandName === "stats") {
     const stats = await loadTranslationStatsSummary(env);
     return discordMessageResponse(buildDiscordStatsMessage(stats), false);
@@ -600,6 +608,7 @@ function buildDiscordHelpMessage() {
     "/errors [limit] - 最近のエラーログを表示します。",
     "/ping - AI 上流APIへの疎通と遅延を表示します。",
     "/simulate lang:<code> text:<本文> - 翻訳API処理を手動で疑似実行します。",
+    "/resetcache - 翻訳キャッシュKVを全削除します。",
     "/stats - 当日と当月の翻訳統計を表示します。",
   ].join("\n");
 }
@@ -895,6 +904,36 @@ async function recordTranslationOutcome(env, lang, textLength, translation) {
     aiSuccess: translation.ok && translation.source === "ai",
     aiFailure: !translation.ok,
   });
+}
+
+async function resetTranslationCache(env, triggeredByUserId) {
+  let cursor = undefined;
+  let deletedCount = 0;
+
+  do {
+    const listing = await env.STATE_KV.list({
+      prefix: "cache:",
+      limit: 1000,
+      cursor,
+    });
+
+    cursor = listing.list_complete ? undefined : listing.cursor;
+
+    if (listing.keys.length > 0) {
+      await Promise.all(
+        listing.keys.map((item) => env.STATE_KV.delete(item.name)),
+      );
+      deletedCount += listing.keys.length;
+    }
+  } while (cursor);
+
+  await recordError(
+    env,
+    createErrorEntry("info", "CACHE_RESET_COMPLETED", "翻訳キャッシュを全削除しました。", {
+      deletedCount,
+      triggeredByUserId,
+    }),
+  );
 }
 
 async function recordTranslationStats(env, metric) {
