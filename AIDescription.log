@@ -44,6 +44,8 @@ Discord 連携
 - 応答は ephemeral を使わず、通常メッセージとして返す
 - 常駐 Bot プロセスは使わない
 - 通常メッセージの `@mention` は受け取らない
+- `/help` 実行時は command 一覧の自己修復チェックを裏で走らせる
+- `DISCORD_GUILD_ID` が設定されている運用では、その guild command を現在定義へ揃え、global command は空配列へ戻す
 
 対応 slash command
 - `/help`

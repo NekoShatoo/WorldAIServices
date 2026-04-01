@@ -209,7 +209,7 @@ async function handleDiscordInteractions(request, env, ctx) {
   }
 
   try {
-    return await handleDiscordApplicationCommand(interaction, env);
+    return await handleDiscordApplicationCommand(interaction, env, ctx);
   } catch (error) {
     const entry = createErrorEntry(
       "critical",
@@ -229,12 +229,14 @@ async function handleDiscordInteractions(request, env, ctx) {
   }
 }
 
-async function handleDiscordApplicationCommand(interaction, env) {
+async function handleDiscordApplicationCommand(interaction, env, ctx) {
   const commandName = interaction?.data?.name ?? "";
   const options = flattenDiscordOptions(interaction?.data?.options ?? []);
 
-  if (commandName === "help")
+  if (commandName === "help") {
+    ctx.waitUntil(autoHealDiscordCommandsOnHelp(env, interaction));
     return discordMessageResponse(buildDiscordHelpMessage(), false);
+  }
 
   if (commandName === "status") {
     const config = await loadConfig(env);
@@ -298,6 +300,142 @@ async function handleDiscordApplicationCommand(interaction, env) {
   }
 
   return discordMessageResponse("未対応のコマンドです。", false);
+}
+
+async function autoHealDiscordCommandsOnHelp(env, interaction) {
+  if (!env.DISCORD_BOT_TOKEN || !env.DISCORD_APPLICATION_ID)
+    return;
+
+  try {
+    const configuredGuildId = String(env.DISCORD_GUILD_ID ?? "").trim();
+    const interactionGuildId = String(interaction?.guild_id ?? "").trim();
+
+    if (configuredGuildId.length > 0 && interactionGuildId === configuredGuildId) {
+      await syncDiscordCommandScope(env, configuredGuildId, DISCORD_COMMANDS);
+      await syncDiscordCommandScope(env, "", []);
+      return;
+    }
+
+    if (configuredGuildId.length === 0)
+      await syncDiscordCommandScope(env, "", DISCORD_COMMANDS);
+  } catch (error) {
+    await recordError(
+      env,
+      createErrorEntry(
+        "error",
+        "DISCORD_COMMAND_AUTO_HEAL_FAILED",
+        "Discord command 自動修復に失敗しました。",
+        {
+          message: error instanceof Error ? error.message : String(error),
+          guildId: interaction?.guild_id ?? "",
+        },
+      ),
+    );
+  }
+}
+
+async function syncDiscordCommandScope(env, guildId, desiredCommands) {
+  const endpoint = buildDiscordCommandEndpoint(env.DISCORD_APPLICATION_ID, guildId);
+  const currentCommands = await fetchDiscordCommandDefinitions(env.DISCORD_BOT_TOKEN, endpoint);
+  if (areDiscordCommandsEquivalent(currentCommands, desiredCommands))
+    return false;
+
+  await putDiscordCommandDefinitions(env.DISCORD_BOT_TOKEN, endpoint, desiredCommands);
+  return true;
+}
+
+function buildDiscordCommandEndpoint(applicationId, guildId) {
+  if (guildId && guildId.length > 0)
+    return `https://discord.com/api/v10/applications/${applicationId}/guilds/${guildId}/commands`;
+
+  return `https://discord.com/api/v10/applications/${applicationId}/commands`;
+}
+
+async function fetchDiscordCommandDefinitions(botToken, endpoint) {
+  const response = await fetch(endpoint, {
+    method: "GET",
+    headers: {
+      authorization: `Bot ${botToken}`,
+    },
+  });
+
+  if (!response.ok)
+    throw new Error(`discord_get_commands_${response.status}`);
+
+  return await response.json();
+}
+
+async function putDiscordCommandDefinitions(botToken, endpoint, commands) {
+  const response = await fetch(endpoint, {
+    method: "PUT",
+    headers: {
+      authorization: `Bot ${botToken}`,
+      "content-type": "application/json",
+    },
+    body: JSON.stringify(commands),
+  });
+
+  if (!response.ok)
+    throw new Error(`discord_put_commands_${response.status}`);
+}
+
+function areDiscordCommandsEquivalent(currentCommands, desiredCommands) {
+  return JSON.stringify(normalizeDiscordCommands(currentCommands)) ===
+    JSON.stringify(normalizeDiscordCommands(desiredCommands));
+}
+
+function normalizeDiscordCommands(commands) {
+  if (!Array.isArray(commands))
+    return [];
+
+  return commands
+    .map((command) => normalizeDiscordCommand(command))
+    .sort((left, right) => left.name.localeCompare(right.name));
+}
+
+function normalizeDiscordCommand(command) {
+  return {
+    name: String(command?.name ?? ""),
+    description: String(command?.description ?? ""),
+    type: safeMetricNumber(command?.type),
+    options: normalizeDiscordOptions(command?.options),
+  };
+}
+
+function normalizeDiscordOptions(options) {
+  if (!Array.isArray(options))
+    return [];
+
+  return options
+    .map((option) => ({
+      type: safeMetricNumber(option?.type),
+      name: String(option?.name ?? ""),
+      description: String(option?.description ?? ""),
+      required: Boolean(option?.required),
+      min_value: normalizeOptionalNumber(option?.min_value),
+      max_value: normalizeOptionalNumber(option?.max_value),
+      min_length: normalizeOptionalNumber(option?.min_length),
+      max_length: normalizeOptionalNumber(option?.max_length),
+      choices: normalizeDiscordChoices(option?.choices),
+      options: normalizeDiscordOptions(option?.options),
+    }))
+    .sort((left, right) => left.name.localeCompare(right.name));
+}
+
+function normalizeDiscordChoices(choices) {
+  if (!Array.isArray(choices))
+    return [];
+
+  return choices
+    .map((choice) => ({
+      name: String(choice?.name ?? ""),
+      value: choice?.value ?? "",
+    }))
+    .sort((left, right) => left.name.localeCompare(right.name));
+}
+
+function normalizeOptionalNumber(value) {
+  return Number.isFinite(value) ? Number(value) : null;
 }
 
 async function verifyDiscordRequest(request, env, rawBody) {
