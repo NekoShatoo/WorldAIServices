@@ -133,51 +133,15 @@ async function handleTranslate(request, env, ctx, url) {
   if (!rateLimit.allowed)
     return jsonResponse({ status: "error", result: "Rate limit exceeded" }, 429);
 
-  const aiResult = await requestAiTranslation(env, config.prompt, parsed.lang, text);
-  if (!aiResult.ok) {
-    ctx.waitUntil(
-      recordTranslationStats(env, {
-        lang: parsed.lang,
-        textLength: countCharacters(text),
-        cacheHit: false,
-        cacheMiss: true,
-        aiRequest: true,
-        aiSuccess: false,
-        aiFailure: true,
-      }),
-    );
-
-    ctx.waitUntil(
-      recordError(
-        env,
-        createErrorEntry("error", "AI_REQUEST_FAILED", "翻訳AIへのリクエストに失敗しました。", {
-          reason: aiResult.reason,
-          lang: parsed.lang,
-          textLength: countCharacters(text),
-        }),
-      ),
-    );
-
-    return jsonResponse({ status: "error", result: "Server error" }, 502);
-  }
-
-  await env.STATE_KV.put(cacheKey, aiResult.result, {
-    expirationTtl: config.cacheTtlSeconds,
+  const translation = await executeTranslation(env, ctx, config, parsed.lang, text, {
+    recordStats: true,
+    useCache: true,
+    writeCache: true,
   });
+  if (!translation.ok)
+    return jsonResponse({ status: "error", result: translation.publicReason }, translation.statusCode);
 
-  ctx.waitUntil(
-    recordTranslationStats(env, {
-      lang: parsed.lang,
-      textLength: countCharacters(text),
-      cacheHit: false,
-      cacheMiss: true,
-      aiRequest: true,
-      aiSuccess: true,
-      aiFailure: false,
-    }),
-  );
-
-  return jsonResponse({ status: "ok", result: aiResult.result });
+  return jsonResponse({ status: "ok", result: translation.result });
 }
 
 async function handleDiscordCommands(request) {
@@ -292,6 +256,36 @@ async function handleDiscordApplicationCommand(interaction, env, ctx) {
     const limit = clampInteger(Number(options.limit), 1, 10, 5);
     const errors = await listRecentErrors(env, limit);
     return discordMessageResponse(buildDiscordErrorsMessage(errors), false);
+  }
+
+  if (commandName === "ping") {
+    const config = await loadConfig(env);
+    const pingResult = await requestAiTranslation(env, config.prompt, "en_US", "ping");
+    return discordMessageResponse(buildDiscordPingMessage(pingResult), false);
+  }
+
+  if (commandName === "simulate") {
+    const config = await loadConfig(env);
+    if (!config.enabled)
+      return discordMessageResponse("服务器已关闭", false);
+
+    const lang = String(options.lang ?? "").trim();
+    const text = String(options.text ?? "").trim();
+    if (lang.length === 0)
+      return discordMessageResponse("lang を指定してください。", false);
+
+    if (text.length === 0)
+      return discordMessageResponse("text を指定してください。", false);
+
+    if (countCharacters(text) > config.maxChars)
+      return discordMessageResponse("Text too long", false);
+
+    const result = await executeTranslation(env, ctx, config, lang, text, {
+      recordStats: false,
+      useCache: true,
+      writeCache: true,
+    });
+    return discordMessageResponse(buildDiscordSimulationMessage(result), false);
   }
 
   if (commandName === "stats") {
@@ -529,6 +523,8 @@ function buildDiscordHelpMessage() {
     "/maxchars value:<1-1000> - 1 件の最大文字数を変更します。",
     "/prompt text:<新しい prompt> - 翻訳 prompt を更新します。",
     "/errors [limit] - 最近のエラーログを表示します。",
+    "/ping - AI 上流APIへの疎通と遅延を表示します。",
+    "/simulate lang:<code> text:<本文> - 翻訳API処理を手動で疑似実行します。",
     "/stats - 当日と当月の翻訳統計を表示します。",
   ].join("\n");
 }
@@ -566,6 +562,46 @@ function buildDiscordStatsMessage(summary) {
       formatStatsBlock("当日", summary.day),
       formatStatsBlock("当月", summary.month),
     ].join("\n\n"),
+  );
+}
+
+function buildDiscordPingMessage(result) {
+  if (!result.ok) {
+    return [
+      "AI ping:",
+      "status: error",
+      `latencyMs: ${result.latencyMs}`,
+      `reason: ${result.publicReason}`,
+    ].join("\n");
+  }
+
+  return [
+    "AI ping:",
+    "status: ok",
+    `latencyMs: ${result.latencyMs}`,
+    `preview: ${sanitizeDiscordLine(result.result).slice(0, 120) || "(empty)"}`,
+  ].join("\n");
+}
+
+function buildDiscordSimulationMessage(result) {
+  if (!result.ok) {
+    return [
+      "simulate:",
+      "status: error",
+      `source: ${result.source}`,
+      `latencyMs: ${result.latencyMs}`,
+      `reason: ${result.publicReason}`,
+    ].join("\n");
+  }
+
+  return truncateDiscordMessage(
+    [
+      "simulate:",
+      "status: ok",
+      `source: ${result.source}`,
+      `latencyMs: ${result.latencyMs}`,
+      `result: ${result.result}`,
+    ].join("\n"),
   );
 }
 
@@ -644,6 +680,105 @@ async function updateConfig(env, partialConfig) {
 
   await env.STATE_KV.put(CONFIG_KEY, JSON.stringify(next));
   return next;
+}
+
+async function executeTranslation(env, ctx, config, lang, text, options) {
+  const startedAt = Date.now();
+  const textLength = countCharacters(text);
+  const cacheKey = await buildCacheKey(lang, text, config.promptVersion);
+
+  if (options.useCache) {
+    const cached = await env.STATE_KV.get(cacheKey);
+    if (cached !== null) {
+      if (options.recordStats) {
+        ctx.waitUntil(
+          recordTranslationStats(env, {
+            lang,
+            textLength,
+            cacheHit: true,
+            cacheMiss: false,
+            aiRequest: false,
+            aiSuccess: false,
+            aiFailure: false,
+          }),
+        );
+      }
+
+      return {
+        ok: true,
+        statusCode: 200,
+        source: "cache",
+        latencyMs: Date.now() - startedAt,
+        result: cached,
+      };
+    }
+  }
+
+  const aiResult = await requestAiTranslation(env, config.prompt, lang, text);
+  if (!aiResult.ok) {
+    if (options.recordStats) {
+      ctx.waitUntil(
+        recordTranslationStats(env, {
+          lang,
+          textLength,
+          cacheHit: false,
+          cacheMiss: true,
+          aiRequest: true,
+          aiSuccess: false,
+          aiFailure: true,
+        }),
+      );
+    }
+
+    ctx.waitUntil(
+      recordError(
+        env,
+        createErrorEntry("error", "AI_REQUEST_FAILED", "翻訳AIへのリクエストに失敗しました。", {
+          reason: aiResult.reason,
+          publicReason: aiResult.publicReason,
+          lang,
+          textLength,
+        }),
+      ),
+    );
+
+    return {
+      ok: false,
+      statusCode: 502,
+      source: "ai",
+      latencyMs: aiResult.latencyMs,
+      publicReason: aiResult.publicReason,
+      reason: aiResult.reason,
+    };
+  }
+
+  if (options.writeCache) {
+    await env.STATE_KV.put(cacheKey, aiResult.result, {
+      expirationTtl: config.cacheTtlSeconds,
+    });
+  }
+
+  if (options.recordStats) {
+    ctx.waitUntil(
+      recordTranslationStats(env, {
+        lang,
+        textLength,
+        cacheHit: false,
+        cacheMiss: true,
+        aiRequest: true,
+        aiSuccess: true,
+        aiFailure: false,
+      }),
+    );
+  }
+
+  return {
+    ok: true,
+    statusCode: 200,
+    source: "ai",
+    latencyMs: aiResult.latencyMs,
+    result: aiResult.result,
+  };
 }
 
 async function recordTranslationStats(env, metric) {
@@ -817,6 +952,7 @@ async function requestAiTranslation(env, prompt, lang, text) {
   const timeoutMs = clampInteger(Number(env.AI_TIMEOUT_MS), 1000, 60000, 10000);
   const controller = new AbortController();
   const timerId = setTimeout(() => controller.abort("timeout"), timeoutMs);
+  const startedAt = Date.now();
 
   try {
     const response =
@@ -825,18 +961,41 @@ async function requestAiTranslation(env, prompt, lang, text) {
         : await fetchResultJsonProvider(env, controller.signal, prompt, input);
 
     if (!response.ok)
-      return response;
+      return {
+        ...response,
+        latencyMs: Date.now() - startedAt,
+      };
 
     const cleaned = response.result.trim();
-    return { ok: true, result: cleaned };
+    return { ok: true, result: cleaned, latencyMs: Date.now() - startedAt };
   } catch (error) {
-    return {
-      ok: false,
-      reason: error instanceof Error ? error.message : String(error),
-    };
+    return buildAiFailureResponse(error, Date.now() - startedAt);
   } finally {
     clearTimeout(timerId);
   }
+}
+
+function buildAiFailureResponse(error, latencyMs) {
+  if (
+    error === "timeout" ||
+    (error instanceof Error && error.name === "AbortError") ||
+    String(error).toLowerCase().includes("timeout")
+  ) {
+    return {
+      ok: false,
+      reason: "timeout",
+      publicReason: "AI request timeout",
+      latencyMs,
+    };
+  }
+
+  const reason = error instanceof Error ? error.message : String(error);
+  return {
+    ok: false,
+    reason,
+    publicReason: "AI request failed",
+    latencyMs,
+  };
 }
 
 async function fetchResultJsonProvider(env, signal, prompt, input) {
@@ -857,6 +1016,7 @@ async function fetchResultJsonProvider(env, signal, prompt, input) {
     return {
       ok: false,
       reason: `upstream_status_${response.status}`,
+      publicReason: `AI upstream status ${response.status}`,
     };
   }
 
@@ -865,6 +1025,7 @@ async function fetchResultJsonProvider(env, signal, prompt, input) {
     return {
       ok: false,
       reason: "upstream_result_missing",
+      publicReason: "AI result missing",
     };
   }
 
@@ -879,6 +1040,7 @@ async function fetchOpenAiCompatible(env, signal, prompt, input) {
     return {
       ok: false,
       reason: "AI_MODEL_missing",
+      publicReason: "AI model missing",
     };
   }
 
@@ -903,6 +1065,7 @@ async function fetchOpenAiCompatible(env, signal, prompt, input) {
     return {
       ok: false,
       reason: `openai_status_${response.status}`,
+      publicReason: `AI upstream status ${response.status}`,
     };
   }
 
@@ -912,6 +1075,7 @@ async function fetchOpenAiCompatible(env, signal, prompt, input) {
     return {
       ok: false,
       reason: "openai_content_missing",
+      publicReason: "AI content missing",
     };
   }
 

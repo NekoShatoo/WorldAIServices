@@ -13,6 +13,7 @@
 - 返却形式は常に `status` と `result`
 - サービス停止中は `{ "status": "error", "result": "服务器已关闭" }`
 - AI 側失敗や内部失敗は詳細を隠し `{ "status": "error", "result": "Server error" }`
+- AI 側失敗は英語の原因文字列をそのまま `result` に返す
 - 文字数上限は既定 300。Discord コマンドで変更可能
 
 低コスト方針
@@ -55,6 +56,8 @@ Discord 連携
 - `/maxchars value:<1-1000>`
 - `/prompt text:<新しい prompt>`
 - `/errors [limit]`
+- `/ping`
+- `/simulate lang:<code> text:<本文>`
 - `/stats`
 
 権限制御
@@ -102,3 +105,5 @@ Discord 連携
 確認済み事項
 - `@mention` ではコマンド実行できない。復旧や command 再登録はローカルスクリプトで行う
 - Git 自動デプロイで Dashboard 側設定を壊さないよう、repo から runtime `[vars]` は外した
+- `/ping` は上流 AI へ実リクエストを 1 回送るので、無料ではない
+- `/simulate` は HTTP 翻訳APIと同じキャッシュ経路を通すが、統計には加算しない

@@ -87,6 +87,34 @@ export const DISCORD_COMMANDS = [
     ],
   },
   {
+    name: "ping",
+    description: "AI 上流APIへの疎通と遅延を確認します。",
+    type: 1,
+  },
+  {
+    name: "simulate",
+    description: "翻訳APIの処理を手動で疑似実行します。",
+    type: 1,
+    options: [
+      {
+        type: 3,
+        name: "lang",
+        description: "翻訳先言語コードです。",
+        required: true,
+        min_length: 1,
+        max_length: 32,
+      },
+      {
+        type: 3,
+        name: "text",
+        description: "翻訳したい本文です。",
+        required: true,
+        min_length: 1,
+        max_length: 300,
+      },
+    ],
+  },
+  {
     name: "stats",
     description: "当日と当月の翻訳統計を表示します。",
     type: 1,
