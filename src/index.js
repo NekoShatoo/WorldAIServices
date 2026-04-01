@@ -168,7 +168,7 @@ async function handleHealth(env) {
 async function handleTranslate(request, env, ctx, url) {
   const config = await loadConfig(env);
   if (!config.enabled)
-    return jsonResponse({ status: "error", result: "服务器已关闭" }, 503);
+    return jsonResponse({ status: "error", result: "Server is closed" }, 503);
 
   const parsed = parseTranslateQuery(url);
   if (!parsed)
@@ -342,7 +342,7 @@ async function handleDiscordApplicationCommand(interaction, env, ctx) {
   if (commandName === "simulate") {
     const config = await loadConfig(env);
     if (!config.enabled)
-      return discordMessageResponse("服务器已关闭", false);
+      return discordMessageResponse("Server is closed", false);
 
     const lang = String(options.lang ?? "").trim();
     const text = String(options.text ?? "").trim();
