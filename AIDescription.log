@@ -83,6 +83,7 @@ Discord 連携
 - このリポジトリは初期状態で空だったため、Worker 一式を新規作成した
 - 管理操作は HTTP Interactions 化したため、旧来の `x-bot-key` 管理API は廃止した
 - サンプル設定は `wrangler.toml` の `[vars]` に集約した
+- `keep_vars = true` を有効化し、Wrangler deploy 時に Dashboard 側の変数設定を不用意に上書きしないようにした
 - 実運用では秘密値を `wrangler secret put` や Cloudflare Dashboard の Secret に移すことを推奨するが、現状はローカル同期を優先してダミー値を `wrangler.toml` に置いている
 - HTTP Interactions には常駐起動タイミングがないため、「起動時に自動で command を掃除する」処理は持たせていない
 - 代わりに同期スクリプトで command 一覧を明示的に再構築する方針にした
