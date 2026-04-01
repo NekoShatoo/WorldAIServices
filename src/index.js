@@ -55,6 +55,77 @@ export default {
   },
 };
 
+export class TranslationCoordinator {
+  constructor(state, env) {
+    this.state = state;
+    this.env = env;
+    this.inFlight = null;
+  }
+
+  async fetch(request) {
+    let payload;
+    try {
+      payload = await request.json();
+    } catch {
+      return jsonResponse({ ok: false, publicReason: "Invalid coordinator payload" }, 400);
+    }
+
+    if (payload?.action !== "translate")
+      return jsonResponse({ ok: false, publicReason: "Invalid coordinator action" }, 400);
+
+    if (this.inFlight === null)
+      this.inFlight = this.runTranslation(payload);
+
+    try {
+      const result = await this.inFlight;
+      return jsonResponse(result, result.statusCode ?? 200);
+    } finally {
+      this.inFlight = null;
+    }
+  }
+
+  async runTranslation(payload) {
+    if (payload.useCache) {
+      const cached = await this.env.STATE_KV.get(payload.cacheKey);
+      if (cached !== null) {
+        return {
+          ok: true,
+          statusCode: 200,
+          source: "cache",
+          latencyMs: 0,
+          result: cached,
+        };
+      }
+    }
+
+    const aiResult = await requestAiTranslation(this.env, payload.prompt, payload.lang, payload.text);
+    if (!aiResult.ok) {
+      return {
+        ok: false,
+        statusCode: 502,
+        source: "ai",
+        latencyMs: aiResult.latencyMs,
+        publicReason: aiResult.publicReason,
+        reason: aiResult.reason,
+      };
+    }
+
+    if (payload.writeCache) {
+      await this.env.STATE_KV.put(payload.cacheKey, aiResult.result, {
+        expirationTtl: payload.cacheTtlSeconds,
+      });
+    }
+
+    return {
+      ok: true,
+      statusCode: 200,
+      source: "ai",
+      latencyMs: aiResult.latencyMs,
+      result: aiResult.result,
+    };
+  }
+}
+
 async function routeRequest(request, env, ctx) {
   const url = new URL(request.url);
 
@@ -134,12 +205,16 @@ async function handleTranslate(request, env, ctx, url) {
     return jsonResponse({ status: "error", result: "Rate limit exceeded" }, 429);
 
   const translation = await executeTranslation(env, ctx, config, parsed.lang, text, {
-    recordStats: true,
     useCache: true,
     writeCache: true,
+    useSingleFlight: true,
   });
-  if (!translation.ok)
+  if (!translation.ok) {
+    ctx.waitUntil(recordTranslationOutcome(env, parsed.lang, countCharacters(text), translation));
     return jsonResponse({ status: "error", result: translation.publicReason }, translation.statusCode);
+  }
+
+  ctx.waitUntil(recordTranslationOutcome(env, parsed.lang, countCharacters(text), translation));
 
   return jsonResponse({ status: "ok", result: translation.result });
 }
@@ -281,9 +356,9 @@ async function handleDiscordApplicationCommand(interaction, env, ctx) {
       return discordMessageResponse("Text too long", false);
 
     const result = await executeTranslation(env, ctx, config, lang, text, {
-      recordStats: false,
       useCache: true,
       writeCache: true,
+      useSingleFlight: true,
     });
     return discordMessageResponse(buildDiscordSimulationMessage(result), false);
   }
@@ -683,6 +758,18 @@ async function updateConfig(env, partialConfig) {
 }
 
 async function executeTranslation(env, ctx, config, lang, text, options) {
+  if (options.useSingleFlight) {
+    return requestTranslationThroughCoordinator(env, {
+      cacheKey: await buildCacheKey(lang, text, config.promptVersion),
+      cacheTtlSeconds: config.cacheTtlSeconds,
+      lang,
+      prompt: config.prompt,
+      text,
+      useCache: options.useCache,
+      writeCache: options.writeCache,
+    });
+  }
+
   const startedAt = Date.now();
   const textLength = countCharacters(text);
   const cacheKey = await buildCacheKey(lang, text, config.promptVersion);
@@ -779,6 +866,35 @@ async function executeTranslation(env, ctx, config, lang, text, options) {
     latencyMs: aiResult.latencyMs,
     result: aiResult.result,
   };
+}
+
+async function requestTranslationThroughCoordinator(env, payload) {
+  const id = env.TRANSLATION_COORDINATOR.idFromName(payload.cacheKey);
+  const stub = env.TRANSLATION_COORDINATOR.get(id);
+  const response = await stub.fetch("https://translation-coordinator/translate", {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+    },
+    body: JSON.stringify({
+      action: "translate",
+      ...payload,
+    }),
+  });
+
+  return await response.json();
+}
+
+async function recordTranslationOutcome(env, lang, textLength, translation) {
+  await recordTranslationStats(env, {
+    lang,
+    textLength,
+    cacheHit: translation.ok && translation.source === "cache",
+    cacheMiss: !translation.ok || translation.source === "ai",
+    aiRequest: !translation.ok || translation.source === "ai",
+    aiSuccess: translation.ok && translation.source === "ai",
+    aiFailure: !translation.ok,
+  });
 }
 
 async function recordTranslationStats(env, metric) {

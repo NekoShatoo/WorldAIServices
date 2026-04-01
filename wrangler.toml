@@ -7,3 +7,11 @@ keep_vars = true
 binding = "STATE_KV"
 id = "d0ec26994ae64e148cbb6733a11d517e"
 preview_id = "d0ec26994ae64e148cbb6733a11d517e"
+
+[[durable_objects.bindings]]
+name = "TRANSLATION_COORDINATOR"
+class_name = "TranslationCoordinator"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["TranslationCoordinator"]

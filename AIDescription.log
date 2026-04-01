@@ -4,6 +4,7 @@
 - 翻訳API: `GET /trans?{lang}={text}`
 - 管理UI: Discord HTTP Interactions
 - キャッシュ: Cloudflare KV
+- 同一翻訳キーの同時実行制御: Cloudflare Durable Object
 - 外部AI: OpenAI 互換 Chat Completions または `result` JSON 形式
 
 翻訳API仕様
@@ -20,6 +21,8 @@
 - キャッシュ優先。未ヒット時だけ AI を呼ぶ
 - キャッシュキーは `promptVersion + lang + text` を SHA-256 化して生成する
 - prompt 更新時は `promptVersion` を増やし、旧キャッシュを論理的に分離する
+- キャッシュ未命中時は Durable Object が同一 key の in-flight を 1 本に束ねる
+- 同じ `promptVersion + lang + text` への同時要求は 1 回だけ AI を呼び、残りは同じ結果を待つ
 - レート制限は IP 単位、既定 1 分 6 回
 - レート制限は KV の簡易 read-modify-write 実装なので強整合ではない
 - 用途は厳密課金ではなく AI 乱発抑止なので、この近似精度を許容する
@@ -98,7 +101,7 @@ Discord 連携
 
 設定方針
 - runtime 変数は `wrangler.toml` に固定せず、Cloudflare Dashboard の Variables / Secrets を正本とする
-- `wrangler.toml` には Worker 固定設定と KV binding だけを残す
+- `wrangler.toml` には Worker 固定設定、KV binding、Durable Object binding / migration だけを残す
 - ローカル確認用のサンプルは `.dev.vars.example` に置き、実際の `.dev.vars` は Git 管理しない
 - `keep_vars = true` を有効にしているが、運用上は Dashboard 側の設定を正本として扱う
 
