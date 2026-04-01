@@ -41,6 +41,13 @@ Discord 連携
 - `scripts/register-discord-commands.mjs`
   - `DISCORD_APPLICATION_ID` と `DISCORD_BOT_TOKEN` で slash command を一括登録する
   - `DISCORD_GUILD_ID` を設定した場合は guild command、空なら global command として登録する
+- `scripts/clear-discord-commands.mjs`
+  - 同じ認証情報で command 一覧を空配列上書きし、既存 command を全削除する
+- `scripts/sync-discord-commands.mjs`
+  - 通常はこちらを使う
+  - `DISCORD_CLEAR_GLOBAL=1` を付けると global command を先に空配列で消し、その後に現在の command 一覧を再登録する
+  - `DISCORD_GUILD_ID` を設定した場合は guild command を再登録する
+- 各スクリプトは process.env が未設定でも `wrangler.toml` の `[vars]` を読んで動作する
 
 対応 slash command
 - `/help`
@@ -54,6 +61,7 @@ Discord 連携
 権限制御
 - `/help` と `/status` は誰でも実行できる
 - それ以外の管理コマンドは `DISCORD_ADMIN_USER_IDS` に含まれる Discord user id のみ実行できる
+- Interaction 応答は ephemeral を使わず、チャンネル参加者に見える通常メッセージとして返す
 
 重大エラー通知
 - 未処理例外は KV に記録する
@@ -76,3 +84,6 @@ Discord 連携
 - 管理操作は HTTP Interactions 化したため、旧来の `x-bot-key` 管理API は廃止した
 - サンプル設定は `wrangler.toml` の `[vars]` に集約した
 - 実運用では秘密値を `wrangler secret put` や Cloudflare Dashboard の Secret に移すことを推奨するが、現状はローカル同期を優先してダミー値を `wrangler.toml` に置いている
+- HTTP Interactions には常駐起動タイミングがないため、「起動時に自動で command を掃除する」処理は持たせていない
+- 代わりに同期スクリプトで command 一覧を明示的に再構築する方針にした
+- 通常メッセージの `@mention` は受け取らないため、command 一覧が壊れた時の復旧経路はローカルの同期スクリプトになる

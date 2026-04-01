@@ -1,5 +1,4 @@
 import { getConfigValue } from "./load-wrangler-vars.mjs";
-import { DISCORD_COMMANDS } from "../src/discordCommands.js";
 
 const applicationId = await getConfigValue("DISCORD_APPLICATION_ID");
 const botToken = await getConfigValue("DISCORD_BOT_TOKEN");
@@ -25,15 +24,14 @@ const response = await fetch(endpoint, {
     authorization: `Bot ${botToken}`,
     "content-type": "application/json",
   },
-  body: JSON.stringify(DISCORD_COMMANDS),
+  body: JSON.stringify([]),
 });
 
 if (!response.ok) {
   const text = await response.text();
-  console.error(`コマンド登録に失敗しました: ${response.status}`);
+  console.error(`コマンド削除に失敗しました: ${response.status}`);
   console.error(text);
   process.exit(1);
 }
 
-const payload = await response.json();
-console.log(`コマンドを ${payload.length} 件登録しました。`);
+console.log(guildId ? "Guild command を全削除しました。" : "Global command を全削除しました。");

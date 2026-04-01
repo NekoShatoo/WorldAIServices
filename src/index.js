@@ -195,25 +195,25 @@ async function handleDiscordApplicationCommand(interaction, env) {
   const options = flattenDiscordOptions(interaction?.data?.options ?? []);
 
   if (commandName === "help")
-    return discordMessageResponse(buildDiscordHelpMessage(), true);
+    return discordMessageResponse(buildDiscordHelpMessage(), false);
 
   if (commandName === "status") {
     const config = await loadConfig(env);
-    return discordMessageResponse(buildDiscordStatusMessage(config), true);
+    return discordMessageResponse(buildDiscordStatusMessage(config), false);
   }
 
   if (!isDiscordAdmin(interaction, env))
-    return discordMessageResponse("このコマンドを実行する権限がありません。", true);
+    return discordMessageResponse("このコマンドを実行する権限がありません。", false);
 
   if (commandName === "service") {
     const action = String(options.action ?? "");
     if (action !== "on" && action !== "off")
-      return discordMessageResponse("action は on または off を指定してください。", true);
+      return discordMessageResponse("action は on または off を指定してください。", false);
 
     const next = await updateConfig(env, { enabled: action === "on" });
     return discordMessageResponse(
       `翻訳サービスを ${next.enabled ? "起動" : "停止"} に変更しました。`,
-      true,
+      false,
     );
   }
 
@@ -221,21 +221,21 @@ async function handleDiscordApplicationCommand(interaction, env) {
     const current = await loadConfig(env);
     const value = clampInteger(Number(options.requests_per_minute), 1, 60, current.requestsPerMinute);
     await updateConfig(env, { requestsPerMinute: value });
-    return discordMessageResponse(`1 分あたりの上限を ${value} 回に変更しました。`, true);
+    return discordMessageResponse(`1 分あたりの上限を ${value} 回に変更しました。`, false);
   }
 
   if (commandName === "maxchars") {
     const current = await loadConfig(env);
     const value = clampInteger(Number(options.value), 1, 1000, current.maxChars);
     await updateConfig(env, { maxChars: value });
-    return discordMessageResponse(`最大文字数を ${value} に変更しました。`, true);
+    return discordMessageResponse(`最大文字数を ${value} に変更しました。`, false);
   }
 
   if (commandName === "prompt") {
     const current = await loadConfig(env);
     const text = String(options.text ?? "").trim();
     if (text.length === 0)
-      return discordMessageResponse("prompt は空文字にできません。", true);
+      return discordMessageResponse("prompt は空文字にできません。", false);
 
     const next = await updateConfig(env, {
       prompt: text,
@@ -243,17 +243,17 @@ async function handleDiscordApplicationCommand(interaction, env) {
     });
     return discordMessageResponse(
       `prompt を更新しました。promptVersion は ${next.promptVersion} です。`,
-      true,
+      false,
     );
   }
 
   if (commandName === "errors") {
     const limit = clampInteger(Number(options.limit), 1, 10, 5);
     const errors = await listRecentErrors(env, limit);
-    return discordMessageResponse(buildDiscordErrorsMessage(errors), true);
+    return discordMessageResponse(buildDiscordErrorsMessage(errors), false);
   }
 
-  return discordMessageResponse("未対応のコマンドです。", true);
+  return discordMessageResponse("未対応のコマンドです。", false);
 }
 
 async function verifyDiscordRequest(request, env, rawBody) {
