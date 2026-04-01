@@ -1,13 +1,15 @@
 この Worker は VRChat 用翻訳APIのバックエンドで、Cloudflare Workers + KV を前提に最小コストで動かす構成です。
 
 目的
-- GET `/trans/{lang}={text}` で翻訳要求を受ける
+- GET `/trans?{lang}={text}` で翻訳要求を受ける
 - まず KV キャッシュを参照し、未ヒット時だけ外部AIへ問い合わせる
 - 結果は KV に保存し、以後は同一入力を安価に返す
-- Discord Bot からサービス停止、prompt 更新、レート制限変更、エラーログ確認を行う
+- Discord HTTP Interactions からサービス停止、prompt 更新、レート制限変更、エラーログ確認を行う
 
 翻訳APIの仕様
-- ルート: `GET /trans/{lang}={text}`
+- ルート: `GET /trans?{lang}={text}`
+- 例: `GET /trans?ja_jp=%E3%81%93%E3%82%93%E3%81%AB%E3%81%A1%E3%81%AF`
+- クエリ文字列の最初の 1 件を翻訳対象として扱い、key を言語コード、value を本文として解釈する
 - `text` は受信後に `trim()` を行う
 - trim 後に空文字なら AI を呼ばず `{ "status": "ok", "result": "" }` を返す
 - 返却形式は常に `status` と `result` のみ
@@ -26,34 +28,49 @@
 AI 呼び出し
 - 既定モード `AI_PROVIDER_MODE=result-json`
 - AI には `input: "[zh_CN]内容"` の形で送り、応答 JSON の `result` を翻訳結果として扱う
-- `prompt` は KV に保持し、Discord Bot から更新できる
+- `prompt` は KV に保持し、Discord の slash command から更新できる
 - 互換用途として `AI_PROVIDER_MODE=openai-chat` も用意し、OpenAI 互換 Chat Completions 形式でも呼べる
 
-Discord Bot 制御API
-- 認証ヘッダ: `x-bot-key`
-- `GET /bot/config`
-  - 現在設定を取得
-- `POST /bot/config`
-  - `enabled`
-  - `prompt`
-  - `requestsPerMinute`
-  - `maxChars`
-  を部分更新
-- `GET /bot/errors?limit=20`
-  - 最近のエラーログを取得
+Discord 連携
+- `POST /discord/interactions`
+  - Discord の Interactions Endpoint URL に設定する
+  - `X-Signature-Ed25519` と `X-Signature-Timestamp` を `DISCORD_PUBLIC_KEY` で検証する
+- `GET /discord/commands`
+  - 登録対象の slash command 定義 JSON を返す
+- `scripts/register-discord-commands.mjs`
+  - `DISCORD_APPLICATION_ID` と `DISCORD_BOT_TOKEN` で slash command を一括登録する
+  - `DISCORD_GUILD_ID` を設定した場合は guild command、空なら global command として登録する
+
+対応 slash command
+- `/help`
+- `/status`
+- `/service action:on|off`
+- `/limit requests_per_minute:<1-60>`
+- `/maxchars value:<1-1000>`
+- `/prompt text:<新しい prompt>`
+- `/errors [limit]`
+
+権限制御
+- `/help` と `/status` は誰でも実行できる
+- それ以外の管理コマンドは `DISCORD_ADMIN_USER_IDS` に含まれる Discord user id のみ実行できる
 
 重大エラー通知
-- 未処理例外は KV に記録し、`BOT_NOTIFY_URL` が設定されていれば tmp-u 向け通知を送る
-- 通知先への認証が必要なら `BOT_NOTIFY_KEY` を `x-bot-key` で送る
+- 未処理例外は KV に記録する
+- `DISCORD_BOT_TOKEN` と `DISCORD_TMP_U_CHANNEL_ID` が設定されていれば、Discord API 経由で tmp-u チャンネルへ通知する
+- 常駐 Bot プロセスは使わず、Worker から必要時のみ Discord API を呼ぶ
 
 環境変数
 - `AI_API_URL`
 - `AI_API_KEY`
 - `AI_MODEL` (`openai-chat` 時のみ)
-- `BOT_CONTROL_KEY`
-- `BOT_NOTIFY_URL`
-- `BOT_NOTIFY_KEY`
+- `DISCORD_PUBLIC_KEY`
+- `DISCORD_BOT_TOKEN`
+- `DISCORD_APPLICATION_ID`
+- `DISCORD_GUILD_ID` (任意)
+- `DISCORD_ADMIN_USER_IDS`
+- `DISCORD_TMP_U_CHANNEL_ID` (任意)
 
 補足
 - このリポジトリは初期状態で空だったため、Worker 一式を新規作成した
-- 管理系レスポンスは `status` と `result` を維持しつつ、`result` に設定オブジェクトやログ配列を返す
+- 管理操作は HTTP Interactions 化したため、旧来の `x-bot-key` 管理API は廃止した
+- `.dev.vars` は実鍵を入れる前提なので Git 管理から除外し、`.dev.vars.example` はダミー値だけを置く
