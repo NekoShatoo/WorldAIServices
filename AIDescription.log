@@ -24,6 +24,10 @@
 - レート制限は IP 単位、既定で 1 分 6 回
 - 現状のレート制限は KV ベースの簡易実装で、Cloudflare KV の特性上、完全な強整合カウンタではない
 - ただし本用途では「AI 乱発の抑制」が主目的なので、低コスト優先でこの方式にしている
+- 翻訳統計も KV 集計で保持する
+- 日次キー `stats:day:YYYY-MM-DD` と月次キー `stats:month:YYYY-MM` を JST 基準で更新する
+- 統計値は requests, 平均文字数, cache hit/miss, AI success/failure, 言語別件数を持つ
+- KV の read-modify-write 方式なので高並列時に少量の誤差が出る可能性はあるが、分析用途の近似値として扱う
 
 AI 呼び出し
 - サンプル既定モードは `AI_PROVIDER_MODE=openai-chat`
@@ -57,6 +61,7 @@ Discord 連携
 - `/maxchars value:<1-1000>`
 - `/prompt text:<新しい prompt>`
 - `/errors [limit]`
+- `/stats`
 
 権限制御
 - `/help` と `/status` は誰でも実行できる

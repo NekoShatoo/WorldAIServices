@@ -21,6 +21,8 @@ const DEFAULT_CONFIG = Object.freeze({
 });
 
 const CONFIG_KEY = "config:service";
+const STATS_DAY_PREFIX = "stats:day:";
+const STATS_MONTH_PREFIX = "stats:month:";
 const DISCORD_MESSAGE_FLAGS_EPHEMERAL = 1 << 6;
 const DISCORD_INTERACTION_TYPE_PING = 1;
 const DISCORD_INTERACTION_TYPE_APPLICATION_COMMAND = 2;
@@ -110,8 +112,21 @@ async function handleTranslate(request, env, ctx, url) {
 
   const cacheKey = await buildCacheKey(parsed.lang, text, config.promptVersion);
   const cached = await env.STATE_KV.get(cacheKey);
-  if (cached !== null)
+  if (cached !== null) {
+    ctx.waitUntil(
+      recordTranslationStats(env, {
+        lang: parsed.lang,
+        textLength: countCharacters(text),
+        cacheHit: true,
+        cacheMiss: false,
+        aiRequest: false,
+        aiSuccess: false,
+        aiFailure: false,
+      }),
+    );
+
     return jsonResponse({ status: "ok", result: cached });
+  }
 
   const clientIp = request.headers.get("CF-Connecting-IP") ?? "unknown";
   const rateLimit = await checkRateLimit(env, clientIp, config.requestsPerMinute);
@@ -120,6 +135,18 @@ async function handleTranslate(request, env, ctx, url) {
 
   const aiResult = await requestAiTranslation(env, config.prompt, parsed.lang, text);
   if (!aiResult.ok) {
+    ctx.waitUntil(
+      recordTranslationStats(env, {
+        lang: parsed.lang,
+        textLength: countCharacters(text),
+        cacheHit: false,
+        cacheMiss: true,
+        aiRequest: true,
+        aiSuccess: false,
+        aiFailure: true,
+      }),
+    );
+
     ctx.waitUntil(
       recordError(
         env,
@@ -137,6 +164,18 @@ async function handleTranslate(request, env, ctx, url) {
   await env.STATE_KV.put(cacheKey, aiResult.result, {
     expirationTtl: config.cacheTtlSeconds,
   });
+
+  ctx.waitUntil(
+    recordTranslationStats(env, {
+      lang: parsed.lang,
+      textLength: countCharacters(text),
+      cacheHit: false,
+      cacheMiss: true,
+      aiRequest: true,
+      aiSuccess: true,
+      aiFailure: false,
+    }),
+  );
 
   return jsonResponse({ status: "ok", result: aiResult.result });
 }
@@ -253,6 +292,11 @@ async function handleDiscordApplicationCommand(interaction, env) {
     return discordMessageResponse(buildDiscordErrorsMessage(errors), false);
   }
 
+  if (commandName === "stats") {
+    const stats = await loadTranslationStatsSummary(env);
+    return discordMessageResponse(buildDiscordStatsMessage(stats), false);
+  }
+
   return discordMessageResponse("未対応のコマンドです。", false);
 }
 
@@ -347,6 +391,7 @@ function buildDiscordHelpMessage() {
     "/maxchars value:<1-1000> - 1 件の最大文字数を変更します。",
     "/prompt text:<新しい prompt> - 翻訳 prompt を更新します。",
     "/errors [limit] - 最近のエラーログを表示します。",
+    "/stats - 当日と当月の翻訳統計を表示します。",
   ].join("\n");
 }
 
@@ -374,6 +419,47 @@ function buildDiscordErrorsMessage(errors) {
   }
 
   return truncateDiscordMessage(lines.join("\n"));
+}
+
+function buildDiscordStatsMessage(summary) {
+  return truncateDiscordMessage(
+    [
+      "翻訳統計:",
+      formatStatsBlock("当日", summary.day),
+      formatStatsBlock("当月", summary.month),
+    ].join("\n\n"),
+  );
+}
+
+function formatStatsBlock(label, record) {
+  const averageLength =
+    record.requestsTotal > 0 ? (record.totalInputChars / record.requestsTotal).toFixed(1) : "0.0";
+  const cacheHitRate =
+    record.requestsTotal > 0 ? ((record.cacheHits / record.requestsTotal) * 100).toFixed(1) : "0.0";
+
+  return [
+    `${label} (${record.periodKey})`,
+    `requests: ${record.requestsTotal}`,
+    `avgLength: ${averageLength}`,
+    `cacheHits: ${record.cacheHits}`,
+    `cacheMisses: ${record.cacheMisses}`,
+    `cacheHitRate: ${cacheHitRate}%`,
+    `aiSuccesses: ${record.aiSuccesses}`,
+    `aiFailures: ${record.aiFailures}`,
+    `languages: ${formatLanguageCounts(record.languages)}`,
+  ].join("\n");
+}
+
+function formatLanguageCounts(languages) {
+  const entries = Object.entries(languages);
+  if (entries.length === 0)
+    return "none";
+
+  return entries
+    .sort((left, right) => right[1] - left[1])
+    .slice(0, 8)
+    .map((item) => `${item[0]}:${item[1]}`)
+    .join(", ");
 }
 
 function sanitizeDiscordLine(value) {
@@ -420,6 +506,94 @@ async function updateConfig(env, partialConfig) {
 
   await env.STATE_KV.put(CONFIG_KEY, JSON.stringify(next));
   return next;
+}
+
+async function recordTranslationStats(env, metric) {
+  const keys = buildStatsKeys();
+  await Promise.all([
+    updateStatsRecord(env, `${STATS_DAY_PREFIX}${keys.dayKey}`, "day", keys.dayKey, metric),
+    updateStatsRecord(env, `${STATS_MONTH_PREFIX}${keys.monthKey}`, "month", keys.monthKey, metric),
+  ]);
+}
+
+async function updateStatsRecord(env, key, period, periodKey, metric) {
+  const stored = await env.STATE_KV.get(key, "json");
+  const next = normalizeStatsRecord(stored, period, periodKey);
+  next.requestsTotal += 1;
+  next.totalInputChars += metric.textLength;
+  next.cacheHits += metric.cacheHit ? 1 : 0;
+  next.cacheMisses += metric.cacheMiss ? 1 : 0;
+  next.aiRequests += metric.aiRequest ? 1 : 0;
+  next.aiSuccesses += metric.aiSuccess ? 1 : 0;
+  next.aiFailures += metric.aiFailure ? 1 : 0;
+  next.languages[metric.lang] = (next.languages[metric.lang] ?? 0) + 1;
+  next.updatedAt = new Date().toISOString();
+
+  await env.STATE_KV.put(key, JSON.stringify(next), {
+    expirationTtl: period === "day" ? 60 * 60 * 24 * 400 : 60 * 60 * 24 * 800,
+  });
+}
+
+async function loadTranslationStatsSummary(env) {
+  const keys = buildStatsKeys();
+  const [dayRecord, monthRecord] = await Promise.all([
+    env.STATE_KV.get(`${STATS_DAY_PREFIX}${keys.dayKey}`, "json"),
+    env.STATE_KV.get(`${STATS_MONTH_PREFIX}${keys.monthKey}`, "json"),
+  ]);
+
+  return {
+    day: normalizeStatsRecord(dayRecord, "day", keys.dayKey),
+    month: normalizeStatsRecord(monthRecord, "month", keys.monthKey),
+  };
+}
+
+function buildStatsKeys() {
+  const now = new Date(Date.now() + 9 * 60 * 60 * 1000);
+  const year = String(now.getUTCFullYear()).padStart(4, "0");
+  const month = String(now.getUTCMonth() + 1).padStart(2, "0");
+  const day = String(now.getUTCDate()).padStart(2, "0");
+
+  return {
+    dayKey: `${year}-${month}-${day}`,
+    monthKey: `${year}-${month}`,
+  };
+}
+
+function normalizeStatsRecord(record, period, periodKey) {
+  const source = record && typeof record === "object" ? record : {};
+  const languages =
+    source.languages && typeof source.languages === "object" && !Array.isArray(source.languages)
+      ? source.languages
+      : {};
+
+  return {
+    period,
+    periodKey,
+    requestsTotal: safeMetricNumber(source.requestsTotal),
+    totalInputChars: safeMetricNumber(source.totalInputChars),
+    cacheHits: safeMetricNumber(source.cacheHits),
+    cacheMisses: safeMetricNumber(source.cacheMisses),
+    aiRequests: safeMetricNumber(source.aiRequests),
+    aiSuccesses: safeMetricNumber(source.aiSuccesses),
+    aiFailures: safeMetricNumber(source.aiFailures),
+    languages: normalizeLanguageCounts(languages),
+    updatedAt: typeof source.updatedAt === "string" ? source.updatedAt : "",
+  };
+}
+
+function normalizeLanguageCounts(languages) {
+  const result = {};
+  for (const [key, value] of Object.entries(languages)) {
+    const count = safeMetricNumber(value);
+    if (count > 0)
+      result[key] = count;
+  }
+
+  return result;
+}
+
+function safeMetricNumber(value) {
+  return Number.isFinite(value) && value > 0 ? Math.floor(value) : 0;
 }
 
 async function loadConfig(env) {

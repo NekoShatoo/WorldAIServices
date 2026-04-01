@@ -86,4 +86,9 @@ export const DISCORD_COMMANDS = [
       },
     ],
   },
+  {
+    name: "stats",
+    description: "当日と当月の翻訳統計を表示します。",
+    type: 1,
+  },
 ];
