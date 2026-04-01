@@ -1,0 +1,8 @@
+{
+  "name": "world-ai-services",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "check": "node --check src/index.js"
+  }
+}

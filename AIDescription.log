@@ -1,0 +1,59 @@
+この Worker は VRChat 用翻訳APIのバックエンドで、Cloudflare Workers + KV を前提に最小コストで動かす構成です。
+
+目的
+- GET `/trans/{lang}={text}` で翻訳要求を受ける
+- まず KV キャッシュを参照し、未ヒット時だけ外部AIへ問い合わせる
+- 結果は KV に保存し、以後は同一入力を安価に返す
+- Discord Bot からサービス停止、prompt 更新、レート制限変更、エラーログ確認を行う
+
+翻訳APIの仕様
+- ルート: `GET /trans/{lang}={text}`
+- `text` は受信後に `trim()` を行う
+- trim 後に空文字なら AI を呼ばず `{ "status": "ok", "result": "" }` を返す
+- 返却形式は常に `status` と `result` のみ
+- サービス停止中は `{ "status": "error", "result": "服务器已关闭" }`
+- AI 側の失敗や内部失敗は詳細を隠し、`{ "status": "error", "result": "Server error" }`
+- 文字数上限は既定で 300 文字、Discord Bot 経由で変更可能
+
+低コスト化の実装方針
+- キャッシュキーは `promptVersion + lang + text` を SHA-256 化して作成
+- prompt を更新したら `promptVersion` を 1 増やし、古い翻訳キャッシュを論理的に切り離す
+- キャッシュヒット時は AI を呼ばない
+- レート制限は IP 単位、既定で 1 分 6 回
+- 現状のレート制限は KV ベースの簡易実装で、Cloudflare KV の特性上、完全な強整合カウンタではない
+- ただし本用途では「AI 乱発の抑制」が主目的なので、低コスト優先でこの方式にしている
+
+AI 呼び出し
+- 既定モード `AI_PROVIDER_MODE=result-json`
+- AI には `input: "[zh_CN]内容"` の形で送り、応答 JSON の `result` を翻訳結果として扱う
+- `prompt` は KV に保持し、Discord Bot から更新できる
+- 互換用途として `AI_PROVIDER_MODE=openai-chat` も用意し、OpenAI 互換 Chat Completions 形式でも呼べる
+
+Discord Bot 制御API
+- 認証ヘッダ: `x-bot-key`
+- `GET /bot/config`
+  - 現在設定を取得
+- `POST /bot/config`
+  - `enabled`
+  - `prompt`
+  - `requestsPerMinute`
+  - `maxChars`
+  を部分更新
+- `GET /bot/errors?limit=20`
+  - 最近のエラーログを取得
+
+重大エラー通知
+- 未処理例外は KV に記録し、`BOT_NOTIFY_URL` が設定されていれば tmp-u 向け通知を送る
+- 通知先への認証が必要なら `BOT_NOTIFY_KEY` を `x-bot-key` で送る
+
+環境変数
+- `AI_API_URL`
+- `AI_API_KEY`
+- `AI_MODEL` (`openai-chat` 時のみ)
+- `BOT_CONTROL_KEY`
+- `BOT_NOTIFY_URL`
+- `BOT_NOTIFY_KEY`
+
+補足
+- このリポジトリは初期状態で空だったため、Worker 一式を新規作成した
+- 管理系レスポンスは `status` と `result` を維持しつつ、`result` に設定オブジェクトやログ配列を返す

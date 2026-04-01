@@ -1,0 +1,6 @@
+AI_API_URL=https://example.com/translate
+AI_API_KEY=replace-me
+AI_MODEL=
+BOT_CONTROL_KEY=replace-me
+BOT_NOTIFY_URL=https://example.com/discordbot/notify
+BOT_NOTIFY_KEY=replace-me
