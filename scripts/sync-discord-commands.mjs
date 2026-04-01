@@ -1,4 +1,4 @@
-import { getConfigValue } from "./load-wrangler-vars.mjs";
+import { getConfigValue } from "./load-local-config.mjs";
 import { DISCORD_COMMANDS } from "../src/discordCommands.js";
 
 const applicationId = await getConfigValue("DISCORD_APPLICATION_ID");

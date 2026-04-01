@@ -3,6 +3,6 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "check": "node --check src/index.js && node --check src/discordCommands.js && node --check scripts/load-wrangler-vars.mjs && node --check scripts/register-discord-commands.mjs && node --check scripts/clear-discord-commands.mjs && node --check scripts/sync-discord-commands.mjs"
+    "check": "node --check src/index.js && node --check src/discordCommands.js && node --check scripts/load-local-config.mjs && node --check scripts/register-discord-commands.mjs && node --check scripts/clear-discord-commands.mjs && node --check scripts/sync-discord-commands.mjs"
   }
 }

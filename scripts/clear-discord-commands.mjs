@@ -1,4 +1,4 @@
-import { getConfigValue } from "./load-wrangler-vars.mjs";
+import { getConfigValue } from "./load-local-config.mjs";
 
 const applicationId = await getConfigValue("DISCORD_APPLICATION_ID");
 const botToken = await getConfigValue("DISCORD_BOT_TOKEN");
