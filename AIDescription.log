@@ -1,57 +1,49 @@
-この Worker は VRChat 用翻訳APIのバックエンドで、Cloudflare Workers + KV を前提に最小コストで動かす構成です。
+この Worker は VRChat 用翻訳APIのバックエンドで、Cloudflare Workers + KV を使って低コスト運用する構成である。
 
-目的
-- GET `/trans?{lang}={text}` で翻訳要求を受ける
-- まず KV キャッシュを参照し、未ヒット時だけ外部AIへ問い合わせる
-- 結果は KV に保存し、以後は同一入力を安価に返す
-- Discord HTTP Interactions からサービス停止、prompt 更新、レート制限変更、エラーログ確認を行う
+概要
+- 翻訳API: `GET /trans?{lang}={text}`
+- 管理UI: Discord HTTP Interactions
+- キャッシュ: Cloudflare KV
+- 外部AI: OpenAI 互換 Chat Completions または `result` JSON 形式
 
-翻訳APIの仕様
-- ルート: `GET /trans?{lang}={text}`
-- 例: `GET /trans?ja_jp=%E3%81%93%E3%82%93%E3%81%AB%E3%81%A1%E3%81%AF`
-- クエリ文字列の最初の 1 件を翻訳対象として扱い、key を言語コード、value を本文として解釈する
-- `text` は受信後に `trim()` を行う
-- trim 後に空文字なら AI を呼ばず `{ "status": "ok", "result": "" }` を返す
-- 返却形式は常に `status` と `result` のみ
+翻訳API仕様
+- クエリの最初の 1 件を使い、key を言語コード、value を本文として扱う
+- 本文は受信後に `trim()` する
+- trim 後に空文字なら AI を呼ばず `{ "status": "ok", "result": "" }`
+- 返却形式は常に `status` と `result`
 - サービス停止中は `{ "status": "error", "result": "服务器已关闭" }`
-- AI 側の失敗や内部失敗は詳細を隠し、`{ "status": "error", "result": "Server error" }`
-- 文字数上限は既定で 300 文字、Discord Bot 経由で変更可能
+- AI 側失敗や内部失敗は詳細を隠し `{ "status": "error", "result": "Server error" }`
+- 文字数上限は既定 300。Discord コマンドで変更可能
 
-低コスト化の実装方針
-- キャッシュキーは `promptVersion + lang + text` を SHA-256 化して作成
-- prompt を更新したら `promptVersion` を 1 増やし、古い翻訳キャッシュを論理的に切り離す
-- キャッシュヒット時は AI を呼ばない
-- レート制限は IP 単位、既定で 1 分 6 回
-- 現状のレート制限は KV ベースの簡易実装で、Cloudflare KV の特性上、完全な強整合カウンタではない
-- ただし本用途では「AI 乱発の抑制」が主目的なので、低コスト優先でこの方式にしている
-- 翻訳統計も KV 集計で保持する
-- 日次キー `stats:day:YYYY-MM-DD` と月次キー `stats:month:YYYY-MM` を JST 基準で更新する
-- 統計値は requests, 平均文字数, cache hit/miss, AI success/failure, 言語別件数を持つ
-- KV の read-modify-write 方式なので高並列時に少量の誤差が出る可能性はあるが、分析用途の近似値として扱う
+低コスト方針
+- キャッシュ優先。未ヒット時だけ AI を呼ぶ
+- キャッシュキーは `promptVersion + lang + text` を SHA-256 化して生成する
+- prompt 更新時は `promptVersion` を増やし、旧キャッシュを論理的に分離する
+- レート制限は IP 単位、既定 1 分 6 回
+- レート制限は KV の簡易 read-modify-write 実装なので強整合ではない
+- 用途は厳密課金ではなく AI 乱発抑止なので、この近似精度を許容する
+
+統計
+- 翻訳処理時に日次・月次の集計を KV に保存する
+- 日次キー: `stats:day:YYYY-MM-DD`
+- 月次キー: `stats:month:YYYY-MM`
+- 時刻基準は JST
+- 集計項目: requests, 平均文字数, cache hit/miss, AI success/failure, 言語別件数
+- これも KV 集計なので高並列時に少量の誤差はありうる
 
 AI 呼び出し
-- サンプル既定モードは `AI_PROVIDER_MODE=openai-chat`
-- AIHubMix のような OpenAI 互換 `POST /v1/chat/completions` を想定し、system に prompt、user に `[zh_CN]内容` を送る
-- `AI_PROVIDER_MODE=result-json` に切り替えた場合のみ、`input: "[zh_CN]内容"` と応答 JSON の `result` を使う
-- `prompt` は KV に保持し、Discord の slash command から更新できる
-- 互換用途として `AI_PROVIDER_MODE=openai-chat` も用意し、OpenAI 互換 Chat Completions 形式でも呼べる
+- 既定サンプルは `AI_PROVIDER_MODE=openai-chat`
+- OpenAI 互換時は system に prompt、user に `[zh_CN]本文` を送る
+- `AI_PROVIDER_MODE=result-json` のときだけ `input: "[zh_CN]本文"` と応答 JSON の `result` を使う
+- `prompt` 自体は KV に保持し、Discord の `/prompt` で更新する
 
 Discord 連携
-- `POST /discord/interactions`
-  - Discord の Interactions Endpoint URL に設定する
-  - `X-Signature-Ed25519` と `X-Signature-Timestamp` を `DISCORD_PUBLIC_KEY` で検証する
-- `GET /discord/commands`
-  - 登録対象の slash command 定義 JSON を返す
-- `scripts/register-discord-commands.mjs`
-  - `DISCORD_APPLICATION_ID` と `DISCORD_BOT_TOKEN` で slash command を一括登録する
-  - `DISCORD_GUILD_ID` を設定した場合は guild command、空なら global command として登録する
-- `scripts/clear-discord-commands.mjs`
-  - 同じ認証情報で command 一覧を空配列上書きし、既存 command を全削除する
-- `scripts/sync-discord-commands.mjs`
-  - 通常はこちらを使う
-  - `DISCORD_CLEAR_GLOBAL=1` を付けると global command を先に空配列で消し、その後に現在の command 一覧を再登録する
-  - `DISCORD_GUILD_ID` を設定した場合は guild command を再登録する
-- 各スクリプトは process.env を最優先し、未設定時は `.dev.vars`、さらに不足時は `wrangler.toml` の `[vars]` を順に読む
+- エンドポイント: `POST /discord/interactions`
+- Discord の Interactions Endpoint URL にはこの URL を設定する
+- `X-Signature-Ed25519` と `X-Signature-Timestamp` を `DISCORD_PUBLIC_KEY` で検証する
+- 応答は ephemeral を使わず、通常メッセージとして返す
+- 常駐 Bot プロセスは使わない
+- 通常メッセージの `@mention` は受け取らない
 
 対応 slash command
 - `/help`
@@ -64,35 +56,47 @@ Discord 連携
 - `/stats`
 
 権限制御
-- `/help` と `/status` は誰でも実行できる
-- それ以外の管理コマンドは `DISCORD_ADMIN_USER_IDS` に含まれる Discord user id のみ実行できる
-- Interaction 応答は ephemeral を使わず、チャンネル参加者に見える通常メッセージとして返す
+- `/help` と `/status` は全員実行可能
+- それ以外は `DISCORD_ADMIN_USER_IDS` に含まれる Discord user id のみ実行可能
 
 重大エラー通知
 - 未処理例外は KV に記録する
-- `DISCORD_BOT_TOKEN` と `DISCORD_TMP_U_CHANNEL_ID` が設定されていれば、Discord API 経由で tmp-u チャンネルへ通知する
-- 常駐 Bot プロセスは使わず、Worker から必要時のみ Discord API を呼ぶ
+- `DISCORD_BOT_TOKEN` と `DISCORD_TMP_U_CHANNEL_ID` がある場合だけ Discord API で tmp-u に通知する
+
+ローカルスクリプト
+- `scripts/register-discord-commands.mjs`
+  - command 一覧を登録する
+- `scripts/clear-discord-commands.mjs`
+  - command 一覧を空配列で上書きし、既存 command を全削除する
+- `scripts/sync-discord-commands.mjs`
+  - 通常はこれを使う
+  - `DISCORD_CLEAR_GLOBAL=1` を付けると global command を先に消してから再登録する
+- 各スクリプトの設定読み込み順
+  - `process.env`
+  - `.dev.vars`
+  - `wrangler.toml` の `[vars]`
 
 環境変数
-- `AI_API_URL`
-- `AI_API_KEY`
-- `AI_MODEL` (`openai-chat` 時のみ)
-- `AI_PROVIDER_MODE`
-- `AI_TIMEOUT_MS`
-- `DISCORD_PUBLIC_KEY`
-- `DISCORD_BOT_TOKEN`
-- `DISCORD_APPLICATION_ID`
-- `DISCORD_GUILD_ID` (任意)
-- `DISCORD_ADMIN_USER_IDS`
-- `DISCORD_TMP_U_CHANNEL_ID` (任意)
+- Variables
+  - `AI_PROVIDER_MODE`
+  - `AI_TIMEOUT_MS`
+  - `AI_API_URL`
+  - `AI_MODEL`
+  - `DISCORD_PUBLIC_KEY`
+  - `DISCORD_APPLICATION_ID`
+  - `DISCORD_GUILD_ID`
+  - `DISCORD_ADMIN_USER_IDS`
+  - `DISCORD_TMP_U_CHANNEL_ID`
+- Secrets
+  - `AI_API_KEY`
+  - `DISCORD_BOT_TOKEN`
 
-補足
-- このリポジトリは初期状態で空だったため、Worker 一式を新規作成した
-- 管理操作は HTTP Interactions 化したため、旧来の `x-bot-key` 管理API は廃止した
-- `wrangler.toml` から runtime 変数を外し、Dashboard の Variables / Secrets を正本として扱う構成に戻した
-- ローカル開発用のサンプルは `.dev.vars.example` に置き、実際の `.dev.vars` は Git 管理しない
-- `keep_vars = true` を有効化し、Wrangler deploy 時に Dashboard 側の変数設定を不用意に上書きしないようにした
-- 実運用では秘密値を Cloudflare Dashboard の Secret で管理し、固定でない設定も Dashboard Variables で管理する前提
-- HTTP Interactions には常駐起動タイミングがないため、「起動時に自動で command を掃除する」処理は持たせていない
-- 代わりに同期スクリプトで command 一覧を明示的に再構築する方針にした
-- 通常メッセージの `@mention` は受け取らないため、command 一覧が壊れた時の復旧経路はローカルの同期スクリプトになる
+設定方針
+- runtime 変数は `wrangler.toml` に固定せず、Cloudflare Dashboard の Variables / Secrets を正本とする
+- `wrangler.toml` には Worker 固定設定と KV binding だけを残す
+- ローカル確認用のサンプルは `.dev.vars.example` に置き、実際の `.dev.vars` は Git 管理しない
+- `keep_vars = true` を有効にしているが、運用上は Dashboard 側の設定を正本として扱う
+
+確認済み事項
+- `@mention` ではコマンド実行できない。復旧や command 再登録はローカルスクリプトで行う
+- Git 自動デプロイで Dashboard 側設定を壊さないよう、repo から runtime `[vars]` は外した
