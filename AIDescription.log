@@ -26,8 +26,9 @@
 - ただし本用途では「AI 乱発の抑制」が主目的なので、低コスト優先でこの方式にしている
 
 AI 呼び出し
-- 既定モード `AI_PROVIDER_MODE=result-json`
-- AI には `input: "[zh_CN]内容"` の形で送り、応答 JSON の `result` を翻訳結果として扱う
+- サンプル既定モードは `AI_PROVIDER_MODE=openai-chat`
+- AIHubMix のような OpenAI 互換 `POST /v1/chat/completions` を想定し、system に prompt、user に `[zh_CN]内容` を送る
+- `AI_PROVIDER_MODE=result-json` に切り替えた場合のみ、`input: "[zh_CN]内容"` と応答 JSON の `result` を使う
 - `prompt` は KV に保持し、Discord の slash command から更新できる
 - 互換用途として `AI_PROVIDER_MODE=openai-chat` も用意し、OpenAI 互換 Chat Completions 形式でも呼べる
 
