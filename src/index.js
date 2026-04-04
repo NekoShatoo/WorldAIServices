@@ -98,7 +98,10 @@ export class TranslationCoordinator {
       }
     }
 
-    const aiResult = await requestAiTranslation(this.env, payload.prompt, payload.lang, payload.text);
+    const aiResult = await requestAiTranslation(this.env, payload.prompt, payload.lang, payload.text, {
+      source: payload.requestSource,
+      promptVersion: payload.promptVersion,
+    });
     if (!aiResult.ok) {
       return {
         ok: false,
@@ -210,6 +213,7 @@ async function handleTranslate(request, env, ctx, url) {
     return jsonResponse({ status: "error", result: "Rate limit exceeded" }, 429);
 
   const translation = await executeTranslation(env, ctx, config, parsed.lang, text, {
+    requestSource: "translate-api",
     useCache: true,
     writeCache: true,
     useSingleFlight: true,
@@ -338,9 +342,18 @@ async function handleDiscordApplicationCommand(interaction, env, ctx) {
     return discordMessageResponse(buildDiscordErrorsMessage(errors), false);
   }
 
+  if (commandName === "llmrequests") {
+    const limit = clampInteger(Number(options.limit), 1, 10, 5);
+    const requests = await listRecentLlmRequests(env, limit);
+    return discordMessageResponse(buildDiscordLlmRequestsMessage(requests), false);
+  }
+
   if (commandName === "ping") {
     const config = await loadConfig(env);
-    const pingResult = await requestAiTranslation(env, config.prompt, "en_US", "ping");
+    const pingResult = await requestAiTranslation(env, config.prompt, "en_US", "ping", {
+      source: "discord-ping",
+      promptVersion: config.promptVersion,
+    });
     return discordMessageResponse(buildDiscordPingMessage(pingResult), false);
   }
 
@@ -361,6 +374,7 @@ async function handleDiscordApplicationCommand(interaction, env, ctx) {
       return discordMessageResponse("Text too long", false);
 
     const result = await executeTranslation(env, ctx, config, lang, text, {
+      requestSource: "discord-simulate",
       useCache: true,
       writeCache: true,
       useSingleFlight: true,
@@ -611,6 +625,7 @@ function buildDiscordHelpMessage() {
     "/maxchars value:<1-1000> - 1 件の最大文字数を変更します。",
     "/prompt text:<新しい prompt> - 翻訳 prompt を更新します。",
     "/errors [limit] - 最近のエラーログを表示します。",
+    "/llmrequests [limit] - 最近の LLM リクエスト記録を表示します。",
     "/ping - AI 上流APIへの疎通と遅延を表示します。",
     "/simulate lang:<code> text:<本文> - 翻訳API処理を手動で疑似実行します。",
     "/resetcache - translation_cache のレコードを全削除します。",
@@ -652,6 +667,33 @@ function buildDiscordStatsMessage(summary) {
       formatStatsBlock("当月", summary.month),
     ].join("\n\n"),
   );
+}
+
+function buildDiscordLlmRequestsMessage(requests) {
+  if (requests.length === 0)
+    return "最近の LLM リクエスト記録はありません。";
+
+  const lines = ["最近の LLM リクエスト:"];
+  for (const item of requests) {
+    const timestamp = sanitizeDiscordLine(item.occurredAt);
+    const source = sanitizeDiscordLine(item.source);
+    const providerMode = sanitizeDiscordLine(item.providerMode);
+    const lang = sanitizeDiscordLine(item.lang);
+    const status = sanitizeDiscordLine(item.status);
+    const reason = sanitizeDiscordLine(item.publicReason);
+    const inputPreview = sanitizeDiscordLine(item.inputPreview);
+
+    lines.push(
+      [
+        `${timestamp} ${source} ${providerMode}`.trim(),
+        `status:${status} lang:${lang} chars:${item.inputChars} promptVersion:${item.promptVersion} latencyMs:${item.latencyMs}`,
+        reason.length > 0 ? `reason:${reason}` : "",
+        inputPreview.length > 0 ? `input:${inputPreview}` : "",
+      ].filter((line) => line.length > 0).join("\n"),
+    );
+  }
+
+  return truncateDiscordMessage(lines.join("\n\n"));
 }
 
 function buildDiscordPingMessage(result) {
@@ -779,6 +821,7 @@ async function executeTranslation(env, ctx, config, lang, text, options) {
       lang,
       promptVersion: config.promptVersion,
       prompt: config.prompt,
+      requestSource: options.requestSource,
       text,
       useCache: options.useCache,
       writeCache: options.writeCache,
@@ -816,7 +859,10 @@ async function executeTranslation(env, ctx, config, lang, text, options) {
     }
   }
 
-  const aiResult = await requestAiTranslation(env, config.prompt, lang, text);
+  const aiResult = await requestAiTranslation(env, config.prompt, lang, text, {
+    source: options.requestSource,
+    promptVersion: config.promptVersion,
+  });
   if (!aiResult.ok) {
     if (options.recordStats) {
       ctx.waitUntil(
@@ -1249,6 +1295,9 @@ async function runDatabaseMaintenance(env) {
     db.prepare(
       "DELETE FROM error_logs WHERE error_id IN (SELECT error_id FROM error_logs WHERE expires_at <= ? LIMIT ?)",
     ).bind(now, MAINTENANCE_BATCH_SIZE),
+    db.prepare(
+      "DELETE FROM llm_request_logs WHERE request_id IN (SELECT request_id FROM llm_request_logs WHERE expires_at <= ? LIMIT ?)",
+    ).bind(now, MAINTENANCE_BATCH_SIZE),
   ]);
 }
 
@@ -1306,7 +1355,7 @@ async function checkRateLimit(env, clientIp, requestsPerMinute) {
   };
 }
 
-async function requestAiTranslation(env, prompt, lang, text) {
+async function requestAiTranslation(env, prompt, lang, text, metadata = {}) {
   const mode = env.AI_PROVIDER_MODE === "openai-chat" ? "openai-chat" : "result-json";
   const input = `[${lang}]${text}`;
   const timeoutMs = clampInteger(Number(env.AI_TIMEOUT_MS), 1000, 60000, 10000);
@@ -1320,16 +1369,23 @@ async function requestAiTranslation(env, prompt, lang, text) {
         ? await fetchOpenAiCompatible(env, controller.signal, prompt, input)
         : await fetchResultJsonProvider(env, controller.signal, prompt, input);
 
-    if (!response.ok)
-      return {
+    if (!response.ok) {
+      const failed = {
         ...response,
         latencyMs: Date.now() - startedAt,
       };
+      await recordLlmRequest(env, buildLlmRequestEntry(metadata, mode, lang, text, failed));
+      return failed;
+    }
 
     const cleaned = response.result.trim();
-    return { ok: true, result: cleaned, latencyMs: Date.now() - startedAt };
+    const succeeded = { ok: true, result: cleaned, latencyMs: Date.now() - startedAt };
+    await recordLlmRequest(env, buildLlmRequestEntry(metadata, mode, lang, text, succeeded));
+    return succeeded;
   } catch (error) {
-    return buildAiFailureResponse(error, Date.now() - startedAt);
+    const failed = buildAiFailureResponse(error, Date.now() - startedAt);
+    await recordLlmRequest(env, buildLlmRequestEntry(metadata, mode, lang, text, failed));
+    return failed;
   } finally {
     clearTimeout(timerId);
   }
@@ -1356,6 +1412,32 @@ function buildAiFailureResponse(error, latencyMs) {
     publicReason: "AI request failed",
     latencyMs,
   };
+}
+
+function buildLlmRequestEntry(metadata, providerMode, lang, text, result) {
+  return {
+    source: typeof metadata?.source === "string" && metadata.source.length > 0
+      ? metadata.source
+      : "unknown",
+    providerMode,
+    lang,
+    inputChars: countCharacters(text),
+    promptVersion: clampInteger(Number(metadata?.promptVersion), 0, 1000000, 0),
+    status: result.ok ? "ok" : "error",
+    latencyMs: safeMetricNumber(result.latencyMs),
+    publicReason: result.ok ? "" : String(result.publicReason ?? ""),
+    inputPreview: buildPreviewText(text, 120),
+    outputPreview: result.ok ? buildPreviewText(result.result, 120) : "",
+    occurredAt: new Date().toISOString(),
+  };
+}
+
+function buildPreviewText(value, maxLength) {
+  const normalized = sanitizeDiscordLine(String(value ?? ""));
+  if (normalized.length <= maxLength)
+    return normalized;
+
+  return `${normalized.slice(0, Math.max(0, maxLength - 3))}...`;
 }
 
 async function fetchResultJsonProvider(env, signal, prompt, input) {
@@ -1517,6 +1599,41 @@ async function listRecentErrors(env, limit) {
   }));
 }
 
+async function listRecentLlmRequests(env, limit) {
+  const result = await getDatabase(env).prepare(
+    `SELECT
+      source,
+      provider_mode,
+      lang,
+      input_chars,
+      prompt_version,
+      status,
+      latency_ms,
+      public_reason,
+      input_preview,
+      output_preview,
+      occurred_at
+    FROM llm_request_logs
+    WHERE expires_at > ?
+    ORDER BY occurred_at DESC
+    LIMIT ?`,
+  ).bind(Date.now(), limit).run();
+
+  return getQueryRows(result).map((row) => ({
+    source: typeof row?.source === "string" ? row.source : "unknown",
+    providerMode: typeof row?.provider_mode === "string" ? row.provider_mode : "",
+    lang: typeof row?.lang === "string" ? row.lang : "",
+    inputChars: safeMetricNumber(row?.input_chars),
+    promptVersion: safeMetricNumber(row?.prompt_version),
+    status: typeof row?.status === "string" ? row.status : "error",
+    latencyMs: safeMetricNumber(row?.latency_ms),
+    publicReason: typeof row?.public_reason === "string" ? row.public_reason : "",
+    inputPreview: typeof row?.input_preview === "string" ? row.input_preview : "",
+    outputPreview: typeof row?.output_preview === "string" ? row.output_preview : "",
+    occurredAt: typeof row?.occurred_at === "string" ? row.occurred_at : "",
+  }));
+}
+
 function createErrorEntry(level, code, message, details) {
   return {
     level,
@@ -1550,6 +1667,47 @@ async function recordError(env, entry) {
     entry.occurredAt,
     now + retentionSeconds * 1000,
   ).run();
+}
+
+async function recordLlmRequest(env, entry) {
+  try {
+    const retentionSeconds = (await loadConfig(env)).errorRetentionSeconds;
+    const now = Date.now();
+    const requestId = `llm:${now.toString().padStart(13, "0")}:${crypto.randomUUID()}`;
+    await getDatabase(env).prepare(
+      `INSERT INTO llm_request_logs (
+        request_id,
+        source,
+        provider_mode,
+        lang,
+        input_chars,
+        prompt_version,
+        status,
+        latency_ms,
+        public_reason,
+        input_preview,
+        output_preview,
+        occurred_at,
+        expires_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).bind(
+      requestId,
+      entry.source,
+      entry.providerMode,
+      entry.lang,
+      entry.inputChars,
+      entry.promptVersion,
+      entry.status,
+      entry.latencyMs,
+      entry.publicReason,
+      entry.inputPreview,
+      entry.outputPreview,
+      entry.occurredAt,
+      now + retentionSeconds * 1000,
+    ).run();
+  } catch (error) {
+    console.error("LLM リクエスト記録の保存に失敗しました。", error);
+  }
 }
 
 function parseStoredJsonObject(value) {

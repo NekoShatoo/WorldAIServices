@@ -87,6 +87,21 @@ export const DISCORD_COMMANDS = [
     ],
   },
   {
+    name: "llmrequests",
+    description: "最近の LLM リクエスト記録を表示します。",
+    type: 1,
+    options: [
+      {
+        type: 4,
+        name: "limit",
+        description: "1 から 10 の整数です。",
+        required: false,
+        min_value: 1,
+        max_value: 10,
+      },
+    ],
+  },
+  {
     name: "ping",
     description: "AI 上流APIへの疎通と遅延を確認します。",
     type: 1,

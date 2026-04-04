@@ -22,6 +22,7 @@
 - `translation_cache` に翻訳結果を保持し、`expires_at` で有効期限を管理する
 - `translation_stats` は `period_type + period_key + lang` 単位で集計する
 - `error_logs` にエラー履歴を保持する
+- `llm_request_logs` に実際に上流 LLM へ送ったリクエスト履歴を保持する
 - `rate_limits` に 1 分窓ごとの簡易カウンタを保持する
 - D1 には自動 TTL が無いので、各リクエストで期限切れ行を少量ずつ掃除する
 
@@ -49,6 +50,8 @@ AI 呼び出し
 - OpenAI 互換時の応答本文は JSON 文字列であることを前提とし、`result` だけを翻訳結果として採用する
 - JSON が壊れている、または `result` が無い場合はエラーとして扱う
 - `AI_PROVIDER_MODE=result-json` のときだけ `input: "[zh_CN]本文"` と応答 JSON の `result` を使う
+- 実際に上流へ送った時だけ `llm_request_logs` に記録する。cache hit は記録しない
+- 記録項目は source, provider_mode, lang, input_chars, prompt_version, status, latency_ms, public_reason, input/output preview である
 
 Discord 連携
 - エンドポイント: `POST /discord/interactions`
@@ -68,6 +71,7 @@ Discord 連携
 - `/maxchars value:<1-1000>`
 - `/prompt text:<新しい prompt>`
 - `/errors [limit]`
+- `/llmrequests [limit]`
 - `/ping`
 - `/simulate lang:<code> text:<本文>`
 - `/resetcache`
@@ -115,7 +119,7 @@ Discord 連携
 
 実装上の注意
 - `service_config` に設定が無い場合は既定値を使う
-- D1 の期限切れ掃除は `translation_cache` / `rate_limits` / `error_logs` を都度少量削除する
+- D1 の期限切れ掃除は `translation_cache` / `rate_limits` / `error_logs` / `llm_request_logs` を都度少量削除する
 
 確認済み事項
 - Cloudflare D1 の Worker API は `prepare().bind().first()` / `run()` / `batch()` を使う
