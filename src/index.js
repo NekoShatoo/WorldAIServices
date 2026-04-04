@@ -1358,6 +1358,7 @@ async function checkRateLimit(env, clientIp, requestsPerMinute) {
 async function requestAiTranslation(env, prompt, lang, text, metadata = {}) {
   const mode = env.AI_PROVIDER_MODE === "openai-chat" ? "openai-chat" : "result-json";
   const input = `[${lang}]${text}`;
+  const resolvedPrompt = resolvePromptTemplate(prompt, lang);
   const timeoutMs = clampInteger(Number(env.AI_TIMEOUT_MS), 1000, 60000, 10000);
   const controller = new AbortController();
   const timerId = setTimeout(() => controller.abort("timeout"), timeoutMs);
@@ -1366,8 +1367,8 @@ async function requestAiTranslation(env, prompt, lang, text, metadata = {}) {
   try {
     const response =
       mode === "openai-chat"
-        ? await fetchOpenAiCompatible(env, controller.signal, prompt, input)
-        : await fetchResultJsonProvider(env, controller.signal, prompt, input);
+        ? await fetchOpenAiCompatible(env, controller.signal, resolvedPrompt, input)
+        : await fetchResultJsonProvider(env, controller.signal, resolvedPrompt, input);
 
     if (!response.ok) {
       const failed = {
@@ -1389,6 +1390,10 @@ async function requestAiTranslation(env, prompt, lang, text, metadata = {}) {
   } finally {
     clearTimeout(timerId);
   }
+}
+
+function resolvePromptTemplate(prompt, lang) {
+  return String(prompt ?? "").split("{Language}").join(lang);
 }
 
 function buildAiFailureResponse(error, latencyMs) {
@@ -1521,18 +1526,9 @@ async function fetchOpenAiCompatible(env, signal, prompt, input) {
     };
   }
 
-  const parsed = parseAiJsonResult(content);
-  if (!parsed.ok) {
-    return {
-      ok: false,
-      reason: parsed.reason,
-      publicReason: parsed.publicReason,
-    };
-  }
-
   return {
     ok: true,
-    result: parsed.result,
+    result: content,
   };
 }
 
@@ -1550,30 +1546,6 @@ function extractChatContent(payload) {
   }
 
   return null;
-}
-
-function parseAiJsonResult(content) {
-  try {
-    const parsed = JSON.parse(content);
-    if (!parsed || typeof parsed.result !== "string") {
-      return {
-        ok: false,
-        reason: "ai_json_result_missing",
-        publicReason: "AI JSON result missing",
-      };
-    }
-
-    return {
-      ok: true,
-      result: parsed.result,
-    };
-  } catch {
-    return {
-      ok: false,
-      reason: "ai_json_invalid",
-      publicReason: "AI JSON invalid",
-    };
-  }
 }
 
 async function listRecentErrors(env, limit) {

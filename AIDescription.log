@@ -47,8 +47,8 @@
 AI 呼び出し
 - 既定サンプルは `AI_PROVIDER_MODE=openai-chat`
 - OpenAI 互換時は system に prompt、user に `[zh_CN]本文` を送る
-- OpenAI 互換時の応答本文は JSON 文字列であることを前提とし、`result` だけを翻訳結果として採用する
-- JSON が壊れている、または `result` が無い場合はエラーとして扱う
+- prompt 内の `{Language}` は実行時にユーザー入力の言語コードへ置換してから送る
+- OpenAI 互換時の応答本文はそのまま翻訳結果として採用する
 - `AI_PROVIDER_MODE=result-json` のときだけ `input: "[zh_CN]本文"` と応答 JSON の `result` を使う
 - 実際に上流へ送った時だけ `llm_request_logs` に記録する。cache hit は記録しない
 - 記録項目は source, provider_mode, lang, input_chars, prompt_version, status, latency_ms, public_reason, input/output preview である
