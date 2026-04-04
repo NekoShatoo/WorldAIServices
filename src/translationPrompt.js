@@ -20,7 +20,7 @@ const TRANSLATION_PROMPTS = Object.freeze({
     },
     { role: "user", content: "wo xi huan xiao mao" },
     { role: "assistant", content: "子猫が好き" },
-    { role: "user", content: "sushi wo tabetai" },
+    { role: "user", content: "I want to eat sushi" },
     { role: "assistant", content: "寿司が食べたい" },
   ],
   ko_KR: [
