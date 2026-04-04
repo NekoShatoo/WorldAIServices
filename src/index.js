@@ -23,6 +23,7 @@ const DEFAULT_CONFIG = Object.freeze({
 const CONFIG_KEY = "config:service";
 const STATS_DAY_PREFIX = "stats:day:";
 const STATS_MONTH_PREFIX = "stats:month:";
+const MAINTENANCE_BATCH_SIZE = 500;
 const DISCORD_MESSAGE_FLAGS_EPHEMERAL = 1 << 6;
 const DISCORD_INTERACTION_TYPE_PING = 1;
 const DISCORD_INTERACTION_TYPE_APPLICATION_COMMAND = 2;
@@ -36,6 +37,8 @@ export default {
   async fetch(request, env, ctx) {
     if (request.method === "OPTIONS")
       return new Response(null, { status: 204, headers: JSON_HEADERS });
+
+    ctx.waitUntil(runDatabaseMaintenance(env));
 
     try {
       return await routeRequest(request, env, ctx);
@@ -86,7 +89,7 @@ export class TranslationCoordinator {
 
   async runTranslation(payload) {
     if (payload.useCache) {
-      const cached = await this.env.STATE_KV.get(payload.cacheKey);
+      const cached = await getCachedTranslation(this.env, payload.cacheKey);
       if (cached !== null) {
         return {
           ok: true,
@@ -111,9 +114,14 @@ export class TranslationCoordinator {
     }
 
     if (payload.writeCache) {
-      await this.env.STATE_KV.put(payload.cacheKey, aiResult.result, {
-        expirationTtl: payload.cacheTtlSeconds,
-      });
+      await putCachedTranslation(
+        this.env,
+        payload.cacheKey,
+        payload.lang,
+        payload.promptVersion,
+        aiResult.result,
+        payload.cacheTtlSeconds,
+      );
     }
 
     return {
@@ -182,7 +190,7 @@ async function handleTranslate(request, env, ctx, url) {
     return jsonResponse({ status: "error", result: "Text too long" }, 400);
 
   const cacheKey = await buildCacheKey(parsed.lang, text, config.promptVersion);
-  const cached = await env.STATE_KV.get(cacheKey);
+  const cached = await getCachedTranslation(env, cacheKey);
   if (cached !== null) {
     ctx.waitUntil(
       recordTranslationStats(env, {
@@ -762,7 +770,7 @@ async function updateConfig(env, partialConfig) {
     ...partialConfig,
   };
 
-  await env.STATE_KV.put(CONFIG_KEY, JSON.stringify(next));
+  await upsertConfig(env, next);
   return next;
 }
 
@@ -772,6 +780,7 @@ async function executeTranslation(env, ctx, config, lang, text, options) {
       cacheKey: await buildCacheKey(lang, text, config.promptVersion),
       cacheTtlSeconds: config.cacheTtlSeconds,
       lang,
+      promptVersion: config.promptVersion,
       prompt: config.prompt,
       text,
       useCache: options.useCache,
@@ -784,7 +793,7 @@ async function executeTranslation(env, ctx, config, lang, text, options) {
   const cacheKey = await buildCacheKey(lang, text, config.promptVersion);
 
   if (options.useCache) {
-    const cached = await env.STATE_KV.get(cacheKey);
+    const cached = await getCachedTranslation(env, cacheKey);
     if (cached !== null) {
       if (options.recordStats) {
         ctx.waitUntil(
@@ -849,9 +858,14 @@ async function executeTranslation(env, ctx, config, lang, text, options) {
   }
 
   if (options.writeCache) {
-    await env.STATE_KV.put(cacheKey, aiResult.result, {
-      expirationTtl: config.cacheTtlSeconds,
-    });
+    await putCachedTranslation(
+      env,
+      cacheKey,
+      lang,
+      config.promptVersion,
+      aiResult.result,
+      config.cacheTtlSeconds,
+    );
   }
 
   if (options.recordStats) {
@@ -907,25 +921,10 @@ async function recordTranslationOutcome(env, lang, textLength, translation) {
 }
 
 async function resetTranslationCache(env, triggeredByUserId) {
-  let cursor = undefined;
-  let deletedCount = 0;
-
-  do {
-    const listing = await env.STATE_KV.list({
-      prefix: "cache:",
-      limit: 1000,
-      cursor,
-    });
-
-    cursor = listing.list_complete ? undefined : listing.cursor;
-
-    if (listing.keys.length > 0) {
-      await Promise.all(
-        listing.keys.map((item) => env.STATE_KV.delete(item.name)),
-      );
-      deletedCount += listing.keys.length;
-    }
-  } while (cursor);
+  const db = getDatabase(env);
+  const countRow = await db.prepare("SELECT COUNT(*) AS count FROM translation_cache").first();
+  const deletedCount = safeMetricNumber(countRow?.count);
+  await db.prepare("DELETE FROM translation_cache").run();
 
   await recordError(
     env,
@@ -938,40 +937,63 @@ async function resetTranslationCache(env, triggeredByUserId) {
 
 async function recordTranslationStats(env, metric) {
   const keys = buildStatsKeys();
-  await Promise.all([
-    updateStatsRecord(env, `${STATS_DAY_PREFIX}${keys.dayKey}`, "day", keys.dayKey, metric),
-    updateStatsRecord(env, `${STATS_MONTH_PREFIX}${keys.monthKey}`, "month", keys.monthKey, metric),
+  const updatedAt = new Date().toISOString();
+  const db = getDatabase(env);
+
+  await db.batch([
+    buildStatsUpsertStatement(db, "day", keys.dayKey, metric, updatedAt),
+    buildStatsUpsertStatement(db, "month", keys.monthKey, metric, updatedAt),
   ]);
 }
 
-async function updateStatsRecord(env, key, period, periodKey, metric) {
-  const stored = await env.STATE_KV.get(key, "json");
-  const next = normalizeStatsRecord(stored, period, periodKey);
-  next.requestsTotal += 1;
-  next.totalInputChars += metric.textLength;
-  next.cacheHits += metric.cacheHit ? 1 : 0;
-  next.cacheMisses += metric.cacheMiss ? 1 : 0;
-  next.aiRequests += metric.aiRequest ? 1 : 0;
-  next.aiSuccesses += metric.aiSuccess ? 1 : 0;
-  next.aiFailures += metric.aiFailure ? 1 : 0;
-  next.languages[metric.lang] = (next.languages[metric.lang] ?? 0) + 1;
-  next.updatedAt = new Date().toISOString();
-
-  await env.STATE_KV.put(key, JSON.stringify(next), {
-    expirationTtl: period === "day" ? 60 * 60 * 24 * 400 : 60 * 60 * 24 * 800,
-  });
+function buildStatsUpsertStatement(db, periodType, periodKey, metric, updatedAt) {
+  return db.prepare(
+    `INSERT INTO translation_stats (
+      period_type,
+      period_key,
+      lang,
+      requests_total,
+      total_input_chars,
+      cache_hits,
+      cache_misses,
+      ai_requests,
+      ai_successes,
+      ai_failures,
+      updated_at
+    ) VALUES (?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(period_type, period_key, lang) DO UPDATE SET
+      requests_total = translation_stats.requests_total + 1,
+      total_input_chars = translation_stats.total_input_chars + excluded.total_input_chars,
+      cache_hits = translation_stats.cache_hits + excluded.cache_hits,
+      cache_misses = translation_stats.cache_misses + excluded.cache_misses,
+      ai_requests = translation_stats.ai_requests + excluded.ai_requests,
+      ai_successes = translation_stats.ai_successes + excluded.ai_successes,
+      ai_failures = translation_stats.ai_failures + excluded.ai_failures,
+      updated_at = excluded.updated_at`,
+  ).bind(
+    periodType,
+    periodKey,
+    metric.lang,
+    metric.textLength,
+    metric.cacheHit ? 1 : 0,
+    metric.cacheMiss ? 1 : 0,
+    metric.aiRequest ? 1 : 0,
+    metric.aiSuccess ? 1 : 0,
+    metric.aiFailure ? 1 : 0,
+    updatedAt,
+  );
 }
 
 async function loadTranslationStatsSummary(env) {
   const keys = buildStatsKeys();
-  const [dayRecord, monthRecord] = await Promise.all([
-    env.STATE_KV.get(`${STATS_DAY_PREFIX}${keys.dayKey}`, "json"),
-    env.STATE_KV.get(`${STATS_MONTH_PREFIX}${keys.monthKey}`, "json"),
+  const [dayRows, monthRows] = await Promise.all([
+    loadStatsRows(env, "day", keys.dayKey),
+    loadStatsRows(env, "month", keys.monthKey),
   ]);
 
   return {
-    day: normalizeStatsRecord(dayRecord, "day", keys.dayKey),
-    month: normalizeStatsRecord(monthRecord, "month", keys.monthKey),
+    day: normalizeStatsRecord(dayRows, "day", keys.dayKey),
+    month: normalizeStatsRecord(monthRows, "month", keys.monthKey),
   };
 }
 
@@ -987,25 +1009,79 @@ function buildStatsKeys() {
   };
 }
 
-function normalizeStatsRecord(record, period, periodKey) {
-  const source = record && typeof record === "object" ? record : {};
-  const languages =
-    source.languages && typeof source.languages === "object" && !Array.isArray(source.languages)
-      ? source.languages
-      : {};
+async function loadStatsRows(env, periodType, periodKey) {
+  const db = getDatabase(env);
+  const result = await db.prepare(
+    `SELECT
+      lang,
+      requests_total,
+      total_input_chars,
+      cache_hits,
+      cache_misses,
+      ai_requests,
+      ai_successes,
+      ai_failures,
+      updated_at
+    FROM translation_stats
+    WHERE period_type = ? AND period_key = ?`,
+  ).bind(periodType, periodKey).run();
+
+  const rows = getQueryRows(result);
+  if (rows.length > 0)
+    return rows;
+
+  return await migrateLegacyStatsIfNeeded(env, periodType, periodKey);
+}
+
+function normalizeStatsRecord(rows, period, periodKey) {
+  const sourceRows = Array.isArray(rows) ? rows : [];
+  const languages = {};
+  let updatedAt = "";
+  let requestsTotal = 0;
+  let totalInputChars = 0;
+  let cacheHits = 0;
+  let cacheMisses = 0;
+  let aiRequests = 0;
+  let aiSuccesses = 0;
+  let aiFailures = 0;
+
+  for (const row of sourceRows) {
+    const lang = typeof row?.lang === "string" ? row.lang : "";
+    const langRequests = safeMetricNumber(row?.requests_total);
+    const langChars = safeMetricNumber(row?.total_input_chars);
+    const langCacheHits = safeMetricNumber(row?.cache_hits);
+    const langCacheMisses = safeMetricNumber(row?.cache_misses);
+    const langAiRequests = safeMetricNumber(row?.ai_requests);
+    const langAiSuccesses = safeMetricNumber(row?.ai_successes);
+    const langAiFailures = safeMetricNumber(row?.ai_failures);
+
+    if (lang.length > 0 && langRequests > 0)
+      languages[lang] = (languages[lang] ?? 0) + langRequests;
+
+    requestsTotal += langRequests;
+    totalInputChars += langChars;
+    cacheHits += langCacheHits;
+    cacheMisses += langCacheMisses;
+    aiRequests += langAiRequests;
+    aiSuccesses += langAiSuccesses;
+    aiFailures += langAiFailures;
+
+    if (typeof row?.updated_at === "string" && row.updated_at > updatedAt)
+      updatedAt = row.updated_at;
+  }
 
   return {
     period,
     periodKey,
-    requestsTotal: safeMetricNumber(source.requestsTotal),
-    totalInputChars: safeMetricNumber(source.totalInputChars),
-    cacheHits: safeMetricNumber(source.cacheHits),
-    cacheMisses: safeMetricNumber(source.cacheMisses),
-    aiRequests: safeMetricNumber(source.aiRequests),
-    aiSuccesses: safeMetricNumber(source.aiSuccesses),
-    aiFailures: safeMetricNumber(source.aiFailures),
+    requestsTotal,
+    totalInputChars,
+    cacheHits,
+    cacheMisses,
+    aiRequests,
+    aiSuccesses,
+    aiFailures,
     languages: normalizeLanguageCounts(languages),
-    updatedAt: typeof source.updatedAt === "string" ? source.updatedAt : "",
+    updatedAt,
   };
 }
 
@@ -1025,9 +1101,27 @@ function safeMetricNumber(value) {
 }
 
 async function loadConfig(env) {
-  const stored = await env.STATE_KV.get(CONFIG_KEY, "json");
-  if (!stored || typeof stored !== "object")
-    return { ...DEFAULT_CONFIG };
+  const db = getDatabase(env);
+  const stored = await db.prepare(
+    `SELECT
+      enabled,
+      prompt,
+      prompt_version AS promptVersion,
+      requests_per_minute AS requestsPerMinute,
+      max_chars AS maxChars,
+      cache_ttl_seconds AS cacheTtlSeconds,
+      error_retention_seconds AS errorRetentionSeconds
+    FROM service_config
+    WHERE config_id = 1`,
+  ).first();
+
+  if (!stored || typeof stored !== "object") {
+    const migrated = await migrateLegacyConfigIfNeeded(env);
+    if (!migrated)
+      return { ...DEFAULT_CONFIG };
+
+    return migrated;
+  }
 
   const prompt =
     typeof stored.prompt === "string" && stored.prompt.trim().length > 0
@@ -1036,7 +1130,7 @@ async function loadConfig(env) {
 
   return {
     ...DEFAULT_CONFIG,
-    enabled: typeof stored.enabled === "boolean" ? stored.enabled : DEFAULT_CONFIG.enabled,
+    enabled: normalizeBooleanFlag(stored.enabled, DEFAULT_CONFIG.enabled),
     prompt,
     promptVersion: clampInteger(Number(stored.promptVersion), 1, 1000000, 1),
     requestsPerMinute: clampInteger(Number(stored.requestsPerMinute), 1, 60, 6),
@@ -1054,6 +1148,270 @@ async function loadConfig(env) {
       DEFAULT_CONFIG.errorRetentionSeconds,
     ),
   };
+}
+
+function getDatabase(env) {
+  if (!env.STATE_DB)
+    throw new Error("STATE_DB binding is not configured.");
+
+  return env.STATE_DB;
+}
+
+function getQueryRows(result) {
+  return Array.isArray(result?.results) ? result.results : [];
+}
+
+function normalizeBooleanFlag(value, fallback) {
+  if (typeof value === "boolean")
+    return value;
+
+  if (value === 1 || value === "1")
+    return true;
+
+  if (value === 0 || value === "0")
+    return false;
+
+  return fallback;
+}
+
+async function upsertConfig(env, config) {
+  await getDatabase(env).prepare(
+    `INSERT INTO service_config (
+      config_id,
+      enabled,
+      prompt,
+      prompt_version,
+      requests_per_minute,
+      max_chars,
+      cache_ttl_seconds,
+      error_retention_seconds,
+      updated_at
+    ) VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(config_id) DO UPDATE SET
+      enabled = excluded.enabled,
+      prompt = excluded.prompt,
+      prompt_version = excluded.prompt_version,
+      requests_per_minute = excluded.requests_per_minute,
+      max_chars = excluded.max_chars,
+      cache_ttl_seconds = excluded.cache_ttl_seconds,
+      error_retention_seconds = excluded.error_retention_seconds,
+      updated_at = excluded.updated_at`,
+  ).bind(
+    config.enabled ? 1 : 0,
+    config.prompt,
+    config.promptVersion,
+    config.requestsPerMinute,
+    config.maxChars,
+    config.cacheTtlSeconds,
+    config.errorRetentionSeconds,
+    new Date().toISOString(),
+  ).run();
+}
+
+async function getCachedTranslation(env, cacheKey) {
+  const row = await getDatabase(env).prepare(
+    `SELECT result
+    FROM translation_cache
+    WHERE cache_key = ? AND expires_at > ?`,
+  ).bind(cacheKey, Date.now()).first();
+
+  if (!row || typeof row.result !== "string")
+    return null;
+
+  return row.result;
+}
+
+async function putCachedTranslation(env, cacheKey, lang, promptVersion, result, ttlSeconds) {
+  const now = Date.now();
+  await getDatabase(env).prepare(
+    `INSERT INTO translation_cache (
+      cache_key,
+      lang,
+      prompt_version,
+      result,
+      expires_at,
+      updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?)
+    ON CONFLICT(cache_key) DO UPDATE SET
+      lang = excluded.lang,
+      prompt_version = excluded.prompt_version,
+      result = excluded.result,
+      expires_at = excluded.expires_at,
+      updated_at = excluded.updated_at`,
+  ).bind(
+    cacheKey,
+    lang,
+    promptVersion,
+    result,
+    now + ttlSeconds * 1000,
+    new Date(now).toISOString(),
+  ).run();
+}
+
+async function runDatabaseMaintenance(env) {
+  const now = Date.now();
+  const db = getDatabase(env);
+  await db.batch([
+    db.prepare(
+      "DELETE FROM translation_cache WHERE cache_key IN (SELECT cache_key FROM translation_cache WHERE expires_at <= ? LIMIT ?)",
+    ).bind(now, MAINTENANCE_BATCH_SIZE),
+    db.prepare(
+      "DELETE FROM rate_limits WHERE window_key IN (SELECT window_key FROM rate_limits WHERE expires_at <= ? LIMIT ?)",
+    ).bind(now, MAINTENANCE_BATCH_SIZE),
+    db.prepare(
+      "DELETE FROM error_logs WHERE error_id IN (SELECT error_id FROM error_logs WHERE expires_at <= ? LIMIT ?)",
+    ).bind(now, MAINTENANCE_BATCH_SIZE),
+  ]);
+}
+
+async function migrateLegacyConfigIfNeeded(env) {
+  if (!env.STATE_KV)
+    return null;
+
+  const stored = await env.STATE_KV.get(CONFIG_KEY, "json");
+  if (!stored || typeof stored !== "object")
+    return null;
+
+  const migrated = {
+    ...DEFAULT_CONFIG,
+    enabled: normalizeBooleanFlag(stored.enabled, DEFAULT_CONFIG.enabled),
+    prompt:
+      typeof stored.prompt === "string" && stored.prompt.trim().length > 0
+        ? stored.prompt.trim()
+        : DEFAULT_CONFIG.prompt,
+    promptVersion: clampInteger(Number(stored.promptVersion), 1, 1000000, 1),
+    requestsPerMinute: clampInteger(Number(stored.requestsPerMinute), 1, 60, 6),
+    maxChars: clampInteger(Number(stored.maxChars), 1, 1000, 300),
+    cacheTtlSeconds: clampInteger(
+      Number(stored.cacheTtlSeconds),
+      60,
+      60 * 60 * 24 * 365,
+      DEFAULT_CONFIG.cacheTtlSeconds,
+    ),
+    errorRetentionSeconds: clampInteger(
+      Number(stored.errorRetentionSeconds),
+      60,
+      60 * 60 * 24 * 365,
+      DEFAULT_CONFIG.errorRetentionSeconds,
+    ),
+  };
+
+  await upsertConfig(env, migrated);
+  return migrated;
+}
+
+async function migrateLegacyStatsIfNeeded(env, periodType, periodKey) {
+  if (!env.STATE_KV)
+    return [];
+
+  const key = `${periodType === "day" ? STATS_DAY_PREFIX : STATS_MONTH_PREFIX}${periodKey}`;
+  const stored = await env.STATE_KV.get(key, "json");
+  if (!stored || typeof stored !== "object")
+    return [];
+
+  const normalized = {
+    requestsTotal: safeMetricNumber(stored.requestsTotal),
+    totalInputChars: safeMetricNumber(stored.totalInputChars),
+    cacheHits: safeMetricNumber(stored.cacheHits),
+    cacheMisses: safeMetricNumber(stored.cacheMisses),
+    aiRequests: safeMetricNumber(stored.aiRequests),
+    aiSuccesses: safeMetricNumber(stored.aiSuccesses),
+    aiFailures: safeMetricNumber(stored.aiFailures),
+    languages:
+      stored.languages && typeof stored.languages === "object" && !Array.isArray(stored.languages)
+        ? normalizeLanguageCounts(stored.languages)
+        : {},
+    updatedAt: typeof stored.updatedAt === "string" ? stored.updatedAt : new Date().toISOString(),
+  };
+
+  const languageEntries = Object.entries(normalized.languages);
+  const rowsToInsert =
+    languageEntries.length > 0 ? languageEntries : [["unknown", normalized.requestsTotal || 1]];
+  let remaining = {
+    requestsTotal: normalized.requestsTotal,
+    totalInputChars: normalized.totalInputChars,
+    cacheHits: normalized.cacheHits,
+    cacheMisses: normalized.cacheMisses,
+    aiRequests: normalized.aiRequests,
+    aiSuccesses: normalized.aiSuccesses,
+    aiFailures: normalized.aiFailures,
+  };
+  const db = getDatabase(env);
+
+  const statements = rowsToInsert.map(([lang, count], index) => {
+    const bucketCount = Math.max(1, safeMetricNumber(count));
+    const isLast = index === rowsToInsert.length - 1;
+    const rowMetrics = {
+      requestsTotal: isLast ? remaining.requestsTotal : Math.min(remaining.requestsTotal, bucketCount),
+      totalInputChars: isLast
+        ? remaining.totalInputChars
+        : splitMetricShare(normalized.totalInputChars, bucketCount, normalized.requestsTotal),
+      cacheHits: isLast
+        ? remaining.cacheHits
+        : splitMetricShare(normalized.cacheHits, bucketCount, normalized.requestsTotal),
+      cacheMisses: isLast
+        ? remaining.cacheMisses
+        : splitMetricShare(normalized.cacheMisses, bucketCount, normalized.requestsTotal),
+      aiRequests: isLast
+        ? remaining.aiRequests
+        : splitMetricShare(normalized.aiRequests, bucketCount, normalized.requestsTotal),
+      aiSuccesses: isLast
+        ? remaining.aiSuccesses
+        : splitMetricShare(normalized.aiSuccesses, bucketCount, normalized.requestsTotal),
+      aiFailures: isLast
+        ? remaining.aiFailures
+        : splitMetricShare(normalized.aiFailures, bucketCount, normalized.requestsTotal),
+    };
+
+    remaining = {
+      requestsTotal: Math.max(0, remaining.requestsTotal - rowMetrics.requestsTotal),
+      totalInputChars: Math.max(0, remaining.totalInputChars - rowMetrics.totalInputChars),
+      cacheHits: Math.max(0, remaining.cacheHits - rowMetrics.cacheHits),
+      cacheMisses: Math.max(0, remaining.cacheMisses - rowMetrics.cacheMisses),
+      aiRequests: Math.max(0, remaining.aiRequests - rowMetrics.aiRequests),
+      aiSuccesses: Math.max(0, remaining.aiSuccesses - rowMetrics.aiSuccesses),
+      aiFailures: Math.max(0, remaining.aiFailures - rowMetrics.aiFailures),
+    };
+
+    return db.prepare(
+      `INSERT INTO translation_stats (
+        period_type,
+        period_key,
+        lang,
+        requests_total,
+        total_input_chars,
+        cache_hits,
+        cache_misses,
+        ai_requests,
+        ai_successes,
+        ai_failures,
+        updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(period_type, period_key, lang) DO NOTHING`,
+    ).bind(
+      periodType,
+      periodKey,
+      lang,
+      rowMetrics.requestsTotal,
+      rowMetrics.totalInputChars,
+      rowMetrics.cacheHits,
+      rowMetrics.cacheMisses,
+      rowMetrics.aiRequests,
+      rowMetrics.aiSuccesses,
+      rowMetrics.aiFailures,
+      normalized.updatedAt,
+    );
+  });
+
+  await db.batch(statements);
+  return await loadStatsRows(env, periodType, periodKey);
+}
+
+function splitMetricShare(total, count, requestsTotal) {
+  if (requestsTotal <= 0)
+    return 0;
+
+  return Math.floor((safeMetricNumber(total) * Math.max(0, count)) / requestsTotal);
 }
 
 function parseTranslateQuery(url) {
@@ -1084,20 +1442,29 @@ async function buildCacheKey(lang, text, promptVersion) {
 async function checkRateLimit(env, clientIp, requestsPerMinute) {
   const now = Date.now();
   const windowKey = `rate:${clientIp}:${Math.floor(now / 60000)}`;
-  const stored = await env.STATE_KV.get(windowKey, "json");
+  const updatedAt = new Date(now).toISOString();
+  const expiresAt = now + 90 * 1000;
+  const row = await getDatabase(env).prepare(
+    `INSERT INTO rate_limits (
+      window_key,
+      count,
+      expires_at,
+      updated_at
+    ) VALUES (?, 1, ?, ?)
+    ON CONFLICT(window_key) DO UPDATE SET
+      count = rate_limits.count + 1,
+      expires_at = excluded.expires_at,
+      updated_at = excluded.updated_at
+    RETURNING count`,
+  ).bind(windowKey, expiresAt, updatedAt).first();
 
-  const count =
-    stored && typeof stored === "object" && Number.isInteger(stored.count) ? stored.count : 0;
-  if (count >= requestsPerMinute)
+  const count = safeMetricNumber(row?.count);
+  if (count > requestsPerMinute)
     return { allowed: false, remaining: 0 };
-
-  await env.STATE_KV.put(windowKey, JSON.stringify({ count: count + 1 }), {
-    expirationTtl: 90,
-  });
 
   return {
     allowed: true,
-    remaining: Math.max(0, requestsPerMinute - count - 1),
+    remaining: Math.max(0, requestsPerMinute - count),
   };
 }
 
@@ -1290,21 +1657,26 @@ function parseAiJsonResult(content) {
 }
 
 async function listRecentErrors(env, limit) {
-  const listing = await env.STATE_KV.list({ prefix: "error:", limit: 200 });
-  const keys = listing.keys
-    .map((item) => item.name)
-    .sort()
-    .slice(-limit)
-    .reverse();
+  const result = await getDatabase(env).prepare(
+    `SELECT
+      level,
+      code,
+      message,
+      details_json,
+      occurred_at
+    FROM error_logs
+    WHERE expires_at > ?
+    ORDER BY occurred_at DESC
+    LIMIT ?`,
+  ).bind(Date.now(), limit).run();
 
-  const result = [];
-  for (const key of keys) {
-    const item = await env.STATE_KV.get(key, "json");
-    if (item)
-      result.push(item);
-  }
-
-  return result;
+  return getQueryRows(result).map((row) => ({
+    level: typeof row?.level === "string" ? row.level : "error",
+    code: typeof row?.code === "string" ? row.code : "",
+    message: typeof row?.message === "string" ? row.message : "",
+    details: parseStoredJsonObject(row?.details_json),
+    occurredAt: typeof row?.occurred_at === "string" ? row.occurred_at : "",
+  }));
 }
 
 function createErrorEntry(level, code, message, details) {
@@ -1319,10 +1691,41 @@ function createErrorEntry(level, code, message, details) {
 
 async function recordError(env, entry) {
   const retentionSeconds = (await loadConfig(env)).errorRetentionSeconds;
-  const key = `error:${Date.now().toString().padStart(13, "0")}:${crypto.randomUUID()}`;
-  await env.STATE_KV.put(key, JSON.stringify(entry), {
-    expirationTtl: retentionSeconds,
-  });
+  const now = Date.now();
+  const errorId = `error:${now.toString().padStart(13, "0")}:${crypto.randomUUID()}`;
+  await getDatabase(env).prepare(
+    `INSERT INTO error_logs (
+      error_id,
+      level,
+      code,
+      message,
+      details_json,
+      occurred_at,
+      expires_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+  ).bind(
+    errorId,
+    entry.level,
+    entry.code,
+    entry.message,
+    JSON.stringify(entry.details ?? {}),
+    entry.occurredAt,
+    now + retentionSeconds * 1000,
+  ).run();
+}
+
+function parseStoredJsonObject(value) {
+  if (typeof value !== "string" || value.length === 0)
+    return {};
+
+  try {
+    const parsed = JSON.parse(value);
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed))
+      return parsed;
+  } catch {
+  }
+
+  return {};
 }
 
 async function notifyCriticalError(env, entry) {
