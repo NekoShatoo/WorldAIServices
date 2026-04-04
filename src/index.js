@@ -660,6 +660,7 @@ function buildDiscordLlmRequestsMessage(requests) {
     const status = sanitizeDiscordLine(item.status);
     const reason = sanitizeDiscordLine(item.publicReason);
     const inputPreview = sanitizeDiscordLine(item.inputPreview);
+    const outputPreview = sanitizeDiscordLine(item.outputPreview);
 
     lines.push(
       [
@@ -667,6 +668,7 @@ function buildDiscordLlmRequestsMessage(requests) {
         `status:${status} lang:${lang} chars:${item.inputChars} promptVersion:${item.promptVersion} latencyMs:${item.latencyMs}`,
         reason.length > 0 ? `reason:${reason}` : "",
         inputPreview.length > 0 ? `input:${inputPreview}` : "",
+        outputPreview.length > 0 ? `output:${outputPreview}` : "",
       ].filter((line) => line.length > 0).join("\n"),
     );
   }
