@@ -116,7 +116,7 @@ export const DISCORD_COMMANDS = [
   },
   {
     name: "resetcache",
-    description: "翻訳キャッシュKVを全削除します。",
+    description: "translation_cache のレコードを全削除します。",
     type: 1,
   },
   {

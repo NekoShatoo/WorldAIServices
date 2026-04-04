@@ -20,9 +20,6 @@ const DEFAULT_CONFIG = Object.freeze({
   errorRetentionSeconds: 60 * 60 * 24 * 14,
 });
 
-const CONFIG_KEY = "config:service";
-const STATS_DAY_PREFIX = "stats:day:";
-const STATS_MONTH_PREFIX = "stats:month:";
 const MAINTENANCE_BATCH_SIZE = 500;
 const DISCORD_MESSAGE_FLAGS_EPHEMERAL = 1 << 6;
 const DISCORD_INTERACTION_TYPE_PING = 1;
@@ -376,7 +373,7 @@ async function handleDiscordApplicationCommand(interaction, env, ctx) {
     ctx.waitUntil(
       resetTranslationCache(env, userId),
     );
-    return discordMessageResponse("cache reset started", false);
+    return discordMessageResponse("translation_cache のレコード削除を開始しました。", false);
   }
 
   if (commandName === "stats") {
@@ -616,7 +613,7 @@ function buildDiscordHelpMessage() {
     "/errors [limit] - 最近のエラーログを表示します。",
     "/ping - AI 上流APIへの疎通と遅延を表示します。",
     "/simulate lang:<code> text:<本文> - 翻訳API処理を手動で疑似実行します。",
-    "/resetcache - 翻訳キャッシュKVを全削除します。",
+    "/resetcache - translation_cache のレコードを全削除します。",
     "/stats - 当日と当月の翻訳統計を表示します。",
   ].join("\n");
 }
@@ -928,7 +925,7 @@ async function resetTranslationCache(env, triggeredByUserId) {
 
   await recordError(
     env,
-    createErrorEntry("info", "CACHE_RESET_COMPLETED", "翻訳キャッシュを全削除しました。", {
+    createErrorEntry("info", "CACHE_RESET_COMPLETED", "translation_cache のレコードを全削除しました。", {
       deletedCount,
       triggeredByUserId,
     }),
@@ -1026,11 +1023,7 @@ async function loadStatsRows(env, periodType, periodKey) {
     WHERE period_type = ? AND period_key = ?`,
   ).bind(periodType, periodKey).run();
 
-  const rows = getQueryRows(result);
-  if (rows.length > 0)
-    return rows;
-
-  return await migrateLegacyStatsIfNeeded(env, periodType, periodKey);
+  return getQueryRows(result);
 }
 
 function normalizeStatsRecord(rows, period, periodKey) {
@@ -1115,13 +1108,8 @@ async function loadConfig(env) {
     WHERE config_id = 1`,
   ).first();
 
-  if (!stored || typeof stored !== "object") {
-    const migrated = await migrateLegacyConfigIfNeeded(env);
-    if (!migrated)
-      return { ...DEFAULT_CONFIG };
-
-    return migrated;
-  }
+  if (!stored || typeof stored !== "object")
+    return { ...DEFAULT_CONFIG };
 
   const prompt =
     typeof stored.prompt === "string" && stored.prompt.trim().length > 0
@@ -1262,156 +1250,6 @@ async function runDatabaseMaintenance(env) {
       "DELETE FROM error_logs WHERE error_id IN (SELECT error_id FROM error_logs WHERE expires_at <= ? LIMIT ?)",
     ).bind(now, MAINTENANCE_BATCH_SIZE),
   ]);
-}
-
-async function migrateLegacyConfigIfNeeded(env) {
-  if (!env.STATE_KV)
-    return null;
-
-  const stored = await env.STATE_KV.get(CONFIG_KEY, "json");
-  if (!stored || typeof stored !== "object")
-    return null;
-
-  const migrated = {
-    ...DEFAULT_CONFIG,
-    enabled: normalizeBooleanFlag(stored.enabled, DEFAULT_CONFIG.enabled),
-    prompt:
-      typeof stored.prompt === "string" && stored.prompt.trim().length > 0
-        ? stored.prompt.trim()
-        : DEFAULT_CONFIG.prompt,
-    promptVersion: clampInteger(Number(stored.promptVersion), 1, 1000000, 1),
-    requestsPerMinute: clampInteger(Number(stored.requestsPerMinute), 1, 60, 6),
-    maxChars: clampInteger(Number(stored.maxChars), 1, 1000, 300),
-    cacheTtlSeconds: clampInteger(
-      Number(stored.cacheTtlSeconds),
-      60,
-      60 * 60 * 24 * 365,
-      DEFAULT_CONFIG.cacheTtlSeconds,
-    ),
-    errorRetentionSeconds: clampInteger(
-      Number(stored.errorRetentionSeconds),
-      60,
-      60 * 60 * 24 * 365,
-      DEFAULT_CONFIG.errorRetentionSeconds,
-    ),
-  };
-
-  await upsertConfig(env, migrated);
-  return migrated;
-}
-
-async function migrateLegacyStatsIfNeeded(env, periodType, periodKey) {
-  if (!env.STATE_KV)
-    return [];
-
-  const key = `${periodType === "day" ? STATS_DAY_PREFIX : STATS_MONTH_PREFIX}${periodKey}`;
-  const stored = await env.STATE_KV.get(key, "json");
-  if (!stored || typeof stored !== "object")
-    return [];
-
-  const normalized = {
-    requestsTotal: safeMetricNumber(stored.requestsTotal),
-    totalInputChars: safeMetricNumber(stored.totalInputChars),
-    cacheHits: safeMetricNumber(stored.cacheHits),
-    cacheMisses: safeMetricNumber(stored.cacheMisses),
-    aiRequests: safeMetricNumber(stored.aiRequests),
-    aiSuccesses: safeMetricNumber(stored.aiSuccesses),
-    aiFailures: safeMetricNumber(stored.aiFailures),
-    languages:
-      stored.languages && typeof stored.languages === "object" && !Array.isArray(stored.languages)
-        ? normalizeLanguageCounts(stored.languages)
-        : {},
-    updatedAt: typeof stored.updatedAt === "string" ? stored.updatedAt : new Date().toISOString(),
-  };
-
-  const languageEntries = Object.entries(normalized.languages);
-  const rowsToInsert =
-    languageEntries.length > 0 ? languageEntries : [["unknown", normalized.requestsTotal || 1]];
-  let remaining = {
-    requestsTotal: normalized.requestsTotal,
-    totalInputChars: normalized.totalInputChars,
-    cacheHits: normalized.cacheHits,
-    cacheMisses: normalized.cacheMisses,
-    aiRequests: normalized.aiRequests,
-    aiSuccesses: normalized.aiSuccesses,
-    aiFailures: normalized.aiFailures,
-  };
-  const db = getDatabase(env);
-
-  const statements = rowsToInsert.map(([lang, count], index) => {
-    const bucketCount = Math.max(1, safeMetricNumber(count));
-    const isLast = index === rowsToInsert.length - 1;
-    const rowMetrics = {
-      requestsTotal: isLast ? remaining.requestsTotal : Math.min(remaining.requestsTotal, bucketCount),
-      totalInputChars: isLast
-        ? remaining.totalInputChars
-        : splitMetricShare(normalized.totalInputChars, bucketCount, normalized.requestsTotal),
-      cacheHits: isLast
-        ? remaining.cacheHits
-        : splitMetricShare(normalized.cacheHits, bucketCount, normalized.requestsTotal),
-      cacheMisses: isLast
-        ? remaining.cacheMisses
-        : splitMetricShare(normalized.cacheMisses, bucketCount, normalized.requestsTotal),
-      aiRequests: isLast
-        ? remaining.aiRequests
-        : splitMetricShare(normalized.aiRequests, bucketCount, normalized.requestsTotal),
-      aiSuccesses: isLast
-        ? remaining.aiSuccesses
-        : splitMetricShare(normalized.aiSuccesses, bucketCount, normalized.requestsTotal),
-      aiFailures: isLast
-        ? remaining.aiFailures
-        : splitMetricShare(normalized.aiFailures, bucketCount, normalized.requestsTotal),
-    };
-
-    remaining = {
-      requestsTotal: Math.max(0, remaining.requestsTotal - rowMetrics.requestsTotal),
-      totalInputChars: Math.max(0, remaining.totalInputChars - rowMetrics.totalInputChars),
-      cacheHits: Math.max(0, remaining.cacheHits - rowMetrics.cacheHits),
-      cacheMisses: Math.max(0, remaining.cacheMisses - rowMetrics.cacheMisses),
-      aiRequests: Math.max(0, remaining.aiRequests - rowMetrics.aiRequests),
-      aiSuccesses: Math.max(0, remaining.aiSuccesses - rowMetrics.aiSuccesses),
-      aiFailures: Math.max(0, remaining.aiFailures - rowMetrics.aiFailures),
-    };
-
-    return db.prepare(
-      `INSERT INTO translation_stats (
-        period_type,
-        period_key,
-        lang,
-        requests_total,
-        total_input_chars,
-        cache_hits,
-        cache_misses,
-        ai_requests,
-        ai_successes,
-        ai_failures,
-        updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-      ON CONFLICT(period_type, period_key, lang) DO NOTHING`,
-    ).bind(
-      periodType,
-      periodKey,
-      lang,
-      rowMetrics.requestsTotal,
-      rowMetrics.totalInputChars,
-      rowMetrics.cacheHits,
-      rowMetrics.cacheMisses,
-      rowMetrics.aiRequests,
-      rowMetrics.aiSuccesses,
-      rowMetrics.aiFailures,
-      normalized.updatedAt,
-    );
-  });
-
-  await db.batch(statements);
-  return await loadStatsRows(env, periodType, periodKey);
-}
-
-function splitMetricShare(total, count, requestsTotal) {
-  if (requestsTotal <= 0)
-    return 0;
-
-  return Math.floor((safeMetricNumber(total) * Math.max(0, count)) / requestsTotal);
 }
 
 function parseTranslateQuery(url) {

@@ -23,7 +23,7 @@
 - `translation_stats` は `period_type + period_key + lang` 単位で集計する
 - `error_logs` にエラー履歴を保持する
 - `rate_limits` に 1 分窓ごとの簡易カウンタを保持する
-- D1 には KV のような TTL が無いので、各リクエストで期限切れ行を少量ずつ掃除する
+- D1 には自動 TTL が無いので、各リクエストで期限切れ行を少量ずつ掃除する
 
 低コスト方針
 - キャッシュ優先。未ヒット時だけ AI を呼ぶ
@@ -31,9 +31,9 @@
 - prompt 更新時は `promptVersion` を増やし、旧キャッシュを論理的に分離する
 - キャッシュ未命中時は Durable Object が同一 key の in-flight を 1 本に束ねる
 - 同じ `promptVersion + lang + text` への同時要求は 1 回だけ AI を呼び、残りは同じ結果を待つ
-- `/resetcache` は `translation_cache` を全削除し、設定・統計・エラーログは消さない
+- `/resetcache` は `translation_cache` のレコードを全削除し、設定・統計・エラーログは消さない
 - レート制限は IP 単位、既定 1 分 6 回
-- レート制限は D1 の単一カウンタ行へ加算するため KV より一貫性は高いが、拒否された回数も同じ窓でカウントされる
+- レート制限は D1 の単一カウンタ行へ加算し、拒否された回数も同じ窓でカウントされる
 
 統計
 - 翻訳処理時に日次・月次の集計を D1 に保存する
@@ -112,13 +112,9 @@ Discord 連携
 設定方針
 - runtime 変数は `wrangler.toml` に固定せず、Cloudflare Dashboard の Variables / Secrets を正本とする
 - `wrangler.toml` には Worker 固定設定、D1 binding、Durable Object binding / migration を残す
-- 既存 `STATE_KV` binding は D1 初回移行時の設定/統計読込フォールバック用に一時的に残している
-- D1 への切替確認後、KV を完全に使わない運用へ寄せるなら binding 削除を検討してよい
 
 実装上の注意
-- `loadConfig()` は D1 に設定が無い場合だけ既存 KV の `config:service` を読み、正規化して D1 へ移す
-- `/stats` は D1 に当日/当月集計が無い場合だけ既存 KV 形式を読み、言語別行へ分配して D1 へ移す
-- 旧 KV キャッシュは引き継がない。promptVersion と TTL を考えると新 D1 キャッシュへ自然に載せ替える方が安全
+- `service_config` に設定が無い場合は既定値を使う
 - D1 の期限切れ掃除は `translation_cache` / `rate_limits` / `error_logs` を都度少量削除する
 
 確認済み事項

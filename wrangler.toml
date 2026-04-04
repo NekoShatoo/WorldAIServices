@@ -3,11 +3,6 @@ main = "src/index.js"
 compatibility_date = "2026-04-01"
 keep_vars = true
 
-[[kv_namespaces]]
-binding = "STATE_KV"
-id = "d0ec26994ae64e148cbb6733a11d517e"
-preview_id = "d0ec26994ae64e148cbb6733a11d517e"
-
 [[d1_databases]]
 binding = "STATE_DB"
 database_name = "vrc-world-ai-services-state"
