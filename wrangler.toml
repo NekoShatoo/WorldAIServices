@@ -11,8 +11,8 @@ preview_id = "d0ec26994ae64e148cbb6733a11d517e"
 [[d1_databases]]
 binding = "STATE_DB"
 database_name = "vrc-world-ai-services-state"
-database_id = "REPLACE_WITH_D1_DATABASE_ID"
-preview_database_id = "REPLACE_WITH_D1_PREVIEW_DATABASE_ID"
+database_id = "7265a522-ed3d-43fb-899d-a438592790f5"
+preview_database_id = "7265a522-ed3d-43fb-899d-a438592790f5"
 migrations_dir = "migrations"
 
 [[durable_objects.bindings]]
