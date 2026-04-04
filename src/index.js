@@ -1,4 +1,5 @@
 import { DISCORD_COMMANDS } from "./discordCommands.js";
+import { buildTranslationMessages, buildTranslationPromptText, TRANSLATION_PROMPT_VERSION } from "./translationPrompt.js";
 
 const JSON_HEADERS = {
   "access-control-allow-origin": "*",
@@ -11,9 +12,6 @@ const JSON_HEADERS = {
 
 const DEFAULT_CONFIG = Object.freeze({
   enabled: true,
-  prompt:
-    "あなたは翻訳専用APIです。入力は先頭に[言語コード]が付いた短文です。説明や補足は返さず、翻訳結果の本文だけを返してください。原文が空なら空文字を返してください。",
-  promptVersion: 1,
   requestsPerMinute: 6,
   maxChars: 300,
   cacheTtlSeconds: 60 * 60 * 24 * 180,
@@ -98,7 +96,7 @@ export class TranslationCoordinator {
       }
     }
 
-    const aiResult = await requestAiTranslation(this.env, payload.prompt, payload.lang, payload.text, {
+    const aiResult = await requestAiTranslation(this.env, payload.lang, payload.text, {
       source: payload.requestSource,
       promptVersion: payload.promptVersion,
     });
@@ -166,7 +164,6 @@ async function handleHealth(env) {
     status: "ok",
     result: {
       enabled: config.enabled,
-      promptVersion: config.promptVersion,
       requestsPerMinute: config.requestsPerMinute,
       maxChars: config.maxChars,
     },
@@ -189,7 +186,7 @@ async function handleTranslate(request, env, ctx, url) {
   if (countCharacters(text) > config.maxChars)
     return jsonResponse({ status: "error", result: "Text too long" }, 400);
 
-  const cacheKey = await buildCacheKey(parsed.lang, text, config.promptVersion);
+  const cacheKey = await buildCacheKey(parsed.lang, text, TRANSLATION_PROMPT_VERSION);
   const cached = await getCachedTranslation(env, cacheKey);
   if (cached !== null) {
     ctx.waitUntil(
@@ -320,22 +317,6 @@ async function handleDiscordApplicationCommand(interaction, env, ctx) {
     return discordMessageResponse(`最大文字数を ${value} に変更しました。`, false);
   }
 
-  if (commandName === "prompt") {
-    const current = await loadConfig(env);
-    const text = String(options.text ?? "").trim();
-    if (text.length === 0)
-      return discordMessageResponse("prompt は空文字にできません。", false);
-
-    const next = await updateConfig(env, {
-      prompt: text,
-      promptVersion: current.promptVersion + 1,
-    });
-    return discordMessageResponse(
-      `prompt を更新しました。promptVersion は ${next.promptVersion} です。`,
-      false,
-    );
-  }
-
   if (commandName === "errors") {
     const limit = clampInteger(Number(options.limit), 1, 10, 5);
     const errors = await listRecentErrors(env, limit);
@@ -349,10 +330,9 @@ async function handleDiscordApplicationCommand(interaction, env, ctx) {
   }
 
   if (commandName === "ping") {
-    const config = await loadConfig(env);
-    const pingResult = await requestAiTranslation(env, config.prompt, "en_US", "ping", {
+    const pingResult = await requestAiTranslation(env, "en_US", "ping", {
       source: "discord-ping",
-      promptVersion: config.promptVersion,
+      promptVersion: TRANSLATION_PROMPT_VERSION,
     });
     return discordMessageResponse(buildDiscordPingMessage(pingResult), false);
   }
@@ -623,7 +603,6 @@ function buildDiscordHelpMessage() {
     "/service action:on|off - サービスの起動状態を切り替えます。",
     "/limit requests_per_minute:<1-60> - IP ごとの 1 分上限を変更します。",
     "/maxchars value:<1-1000> - 1 件の最大文字数を変更します。",
-    "/prompt text:<新しい prompt> - 翻訳 prompt を更新します。",
     "/errors [limit] - 最近のエラーログを表示します。",
     "/llmrequests [limit] - 最近の LLM リクエスト記録を表示します。",
     "/ping - AI 上流APIへの疎通と遅延を表示します。",
@@ -637,7 +616,6 @@ function buildDiscordStatusMessage(config) {
   return [
     "現在設定:",
     `enabled: ${config.enabled}`,
-    `promptVersion: ${config.promptVersion}`,
     `requestsPerMinute: ${config.requestsPerMinute}`,
     `maxChars: ${config.maxChars}`,
     `cacheTtlSeconds: ${config.cacheTtlSeconds}`,
@@ -816,11 +794,10 @@ async function updateConfig(env, partialConfig) {
 async function executeTranslation(env, ctx, config, lang, text, options) {
   if (options.useSingleFlight) {
     return requestTranslationThroughCoordinator(env, {
-      cacheKey: await buildCacheKey(lang, text, config.promptVersion),
+      cacheKey: await buildCacheKey(lang, text, TRANSLATION_PROMPT_VERSION),
       cacheTtlSeconds: config.cacheTtlSeconds,
       lang,
-      promptVersion: config.promptVersion,
-      prompt: config.prompt,
+      promptVersion: TRANSLATION_PROMPT_VERSION,
       requestSource: options.requestSource,
       text,
       useCache: options.useCache,
@@ -830,7 +807,7 @@ async function executeTranslation(env, ctx, config, lang, text, options) {
 
   const startedAt = Date.now();
   const textLength = countCharacters(text);
-  const cacheKey = await buildCacheKey(lang, text, config.promptVersion);
+  const cacheKey = await buildCacheKey(lang, text, TRANSLATION_PROMPT_VERSION);
 
   if (options.useCache) {
     const cached = await getCachedTranslation(env, cacheKey);
@@ -859,9 +836,9 @@ async function executeTranslation(env, ctx, config, lang, text, options) {
     }
   }
 
-  const aiResult = await requestAiTranslation(env, config.prompt, lang, text, {
+  const aiResult = await requestAiTranslation(env, lang, text, {
     source: options.requestSource,
-    promptVersion: config.promptVersion,
+    promptVersion: TRANSLATION_PROMPT_VERSION,
   });
   if (!aiResult.ok) {
     if (options.recordStats) {
@@ -905,7 +882,7 @@ async function executeTranslation(env, ctx, config, lang, text, options) {
       env,
       cacheKey,
       lang,
-      config.promptVersion,
+      TRANSLATION_PROMPT_VERSION,
       aiResult.result,
       config.cacheTtlSeconds,
     );
@@ -1144,8 +1121,6 @@ async function loadConfig(env) {
   const stored = await db.prepare(
     `SELECT
       enabled,
-      prompt,
-      prompt_version AS promptVersion,
       requests_per_minute AS requestsPerMinute,
       max_chars AS maxChars,
       cache_ttl_seconds AS cacheTtlSeconds,
@@ -1157,16 +1132,9 @@ async function loadConfig(env) {
   if (!stored || typeof stored !== "object")
     return { ...DEFAULT_CONFIG };
 
-  const prompt =
-    typeof stored.prompt === "string" && stored.prompt.trim().length > 0
-      ? stored.prompt.trim()
-      : DEFAULT_CONFIG.prompt;
-
   return {
     ...DEFAULT_CONFIG,
     enabled: normalizeBooleanFlag(stored.enabled, DEFAULT_CONFIG.enabled),
-    prompt,
-    promptVersion: clampInteger(Number(stored.promptVersion), 1, 1000000, 1),
     requestsPerMinute: clampInteger(Number(stored.requestsPerMinute), 1, 60, 6),
     maxChars: clampInteger(Number(stored.maxChars), 1, 1000, 300),
     cacheTtlSeconds: clampInteger(
@@ -1213,18 +1181,14 @@ async function upsertConfig(env, config) {
     `INSERT INTO service_config (
       config_id,
       enabled,
-      prompt,
-      prompt_version,
       requests_per_minute,
       max_chars,
       cache_ttl_seconds,
       error_retention_seconds,
       updated_at
-    ) VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?)
+    ) VALUES (1, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(config_id) DO UPDATE SET
       enabled = excluded.enabled,
-      prompt = excluded.prompt,
-      prompt_version = excluded.prompt_version,
       requests_per_minute = excluded.requests_per_minute,
       max_chars = excluded.max_chars,
       cache_ttl_seconds = excluded.cache_ttl_seconds,
@@ -1232,8 +1196,6 @@ async function upsertConfig(env, config) {
       updated_at = excluded.updated_at`,
   ).bind(
     config.enabled ? 1 : 0,
-    config.prompt,
-    config.promptVersion,
     config.requestsPerMinute,
     config.maxChars,
     config.cacheTtlSeconds,
@@ -1355,10 +1317,11 @@ async function checkRateLimit(env, clientIp, requestsPerMinute) {
   };
 }
 
-async function requestAiTranslation(env, prompt, lang, text, metadata = {}) {
+async function requestAiTranslation(env, lang, text, metadata = {}) {
   const mode = env.AI_PROVIDER_MODE === "openai-chat" ? "openai-chat" : "result-json";
-  const input = `[${lang}]${text}`;
-  const resolvedPrompt = resolvePromptTemplate(prompt, lang);
+  const input = text;
+  const promptText = buildTranslationPromptText(lang);
+  const messages = buildTranslationMessages(lang, text);
   const timeoutMs = clampInteger(Number(env.AI_TIMEOUT_MS), 1000, 60000, 10000);
   const controller = new AbortController();
   const timerId = setTimeout(() => controller.abort("timeout"), timeoutMs);
@@ -1367,8 +1330,8 @@ async function requestAiTranslation(env, prompt, lang, text, metadata = {}) {
   try {
     const response =
       mode === "openai-chat"
-        ? await fetchOpenAiCompatible(env, controller.signal, resolvedPrompt, input)
-        : await fetchResultJsonProvider(env, controller.signal, resolvedPrompt, input);
+        ? await fetchOpenAiCompatible(env, controller.signal, messages)
+        : await fetchResultJsonProvider(env, controller.signal, promptText, input);
 
     if (!response.ok) {
       const failed = {
@@ -1390,10 +1353,6 @@ async function requestAiTranslation(env, prompt, lang, text, metadata = {}) {
   } finally {
     clearTimeout(timerId);
   }
-}
-
-function resolvePromptTemplate(prompt, lang) {
-  return String(prompt ?? "").split("{Language}").join(lang);
 }
 
 function buildAiFailureResponse(error, latencyMs) {
@@ -1482,7 +1441,7 @@ async function fetchResultJsonProvider(env, signal, prompt, input) {
   };
 }
 
-async function fetchOpenAiCompatible(env, signal, prompt, input) {
+async function fetchOpenAiCompatible(env, signal, messages) {
   if (!env.AI_MODEL) {
     return {
       ok: false,
@@ -1501,10 +1460,7 @@ async function fetchOpenAiCompatible(env, signal, prompt, input) {
     body: JSON.stringify({
       model: env.AI_MODEL,
       temperature: 0,
-      messages: [
-        { role: "system", content: prompt },
-        { role: "user", content: input },
-      ],
+      messages,
     }),
   });
 

@@ -6,6 +6,7 @@
 - 永続設定/キャッシュ/統計/エラーログ/簡易レート制限: Cloudflare D1
 - 同一翻訳キーの同時実行制御: Cloudflare Durable Object
 - 外部AI: OpenAI 互換 Chat Completions または `result` JSON 形式
+- 翻訳 prompt は `src/translationPrompt.js` の単一ファイルに固定で保持する
 
 翻訳API仕様
 - クエリの最初の 1 件を使い、key を言語コード、value を本文として扱う
@@ -28,10 +29,10 @@
 
 低コスト方針
 - キャッシュ優先。未ヒット時だけ AI を呼ぶ
-- キャッシュキーは `promptVersion + lang + text` を SHA-256 化して生成する
-- prompt 更新時は `promptVersion` を増やし、旧キャッシュを論理的に分離する
+- キャッシュキーは `TRANSLATION_PROMPT_VERSION + lang + text` を SHA-256 化して生成する
+- prompt 定義を変えたときは `src/translationPrompt.js` の `TRANSLATION_PROMPT_VERSION` を更新して旧キャッシュを論理的に分離する
 - キャッシュ未命中時は Durable Object が同一 key の in-flight を 1 本に束ねる
-- 同じ `promptVersion + lang + text` への同時要求は 1 回だけ AI を呼び、残りは同じ結果を待つ
+- 同じ `TRANSLATION_PROMPT_VERSION + lang + text` への同時要求は 1 回だけ AI を呼び、残りは同じ結果を待つ
 - `/resetcache` は `translation_cache` のレコードを全削除し、設定・統計・エラーログは消さない
 - レート制限は IP 単位、既定 1 分 6 回
 - レート制限は D1 の単一カウンタ行へ加算し、拒否された回数も同じ窓でカウントされる
@@ -46,10 +47,10 @@
 
 AI 呼び出し
 - 既定サンプルは `AI_PROVIDER_MODE=openai-chat`
-- OpenAI 互換時は system に prompt、user に `[zh_CN]本文` を送る
-- prompt 内の `{Language}` は実行時にユーザー入力の言語コードへ置換してから送る
+- OpenAI 互換時は `src/translationPrompt.js` から現在言語の prompt 配列を取得し、その末尾に `{ role: "user", content: 本文 }` を追加して送る
+- 対応言語が無い場合は `fallback` を使い、`{{LANG}}` をユーザー入力の言語コードへ置換する
 - OpenAI 互換時の応答本文はそのまま翻訳結果として採用する
-- `AI_PROVIDER_MODE=result-json` のときだけ `input: "[zh_CN]本文"` と応答 JSON の `result` を使う
+- `AI_PROVIDER_MODE=result-json` のときは prompt 配列を role 付きテキストへ整形したものを `prompt` に使い、応答 JSON の `result` を使う
 - 実際に上流へ送った時だけ `llm_request_logs` に記録する。cache hit は記録しない
 - 記録項目は source, provider_mode, lang, input_chars, prompt_version, status, latency_ms, public_reason, input/output preview である
 
@@ -69,7 +70,6 @@ Discord 連携
 - `/service action:on|off`
 - `/limit requests_per_minute:<1-60>`
 - `/maxchars value:<1-1000>`
-- `/prompt text:<新しい prompt>`
 - `/errors [limit]`
 - `/llmrequests [limit]`
 - `/ping`
@@ -119,6 +119,7 @@ Discord 連携
 
 実装上の注意
 - `service_config` に設定が無い場合は既定値を使う
+- prompt の実体は `src/translationPrompt.js` のみを正本とし、Discord や DB からは変更しない
 - D1 の期限切れ掃除は `translation_cache` / `rate_limits` / `error_logs` / `llm_request_logs` を都度少量削除する
 
 確認済み事項

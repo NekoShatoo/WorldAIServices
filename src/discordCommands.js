@@ -57,21 +57,6 @@ export const DISCORD_COMMANDS = [
     ],
   },
   {
-    name: "prompt",
-    description: "翻訳用 prompt を更新します。",
-    type: 1,
-    options: [
-      {
-        type: 3,
-        name: "text",
-        description: "新しい prompt 文字列です。",
-        required: true,
-        min_length: 1,
-        max_length: 4000,
-      },
-    ],
-  },
-  {
     name: "errors",
     description: "最近のエラーログを表示します。",
     type: 1,
