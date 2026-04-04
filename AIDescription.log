@@ -9,6 +9,10 @@
 - 翻訳 prompt は `src/translationPrompt.js` の単一ファイルに固定で保持する
 
 翻訳API仕様
+- `/trans` は Unity クライアント想定のヘッダーだけを受け付ける
+- 許可条件は `User-Agent` に `UnityPlayer` を含み、`Accept` が正確に `*/*` で、`X-Unity-Version` が空でないこと
+- Unity のバージョン文字列自体は固定しない。`UnityPlayer/2022.3.22f2-DWR` や `X-Unity-Version: 2022.3.22f2-DWR` のような変化は許容する
+- 条件を満たさない場合は `{ "status": "error", "result": "Unauthorized client" }` を 403 で返す
 - クエリの最初の 1 件を使い、key を言語コード、value を本文として扱う
 - 本文は受信後に `trim()` する
 - trim 後に空文字なら AI を呼ばず `{ "status": "ok", "result": "" }`

@@ -171,6 +171,9 @@ async function handleHealth(env) {
 }
 
 async function handleTranslate(request, env, ctx, url) {
+  if (!isAllowedUnityTranslateRequest(request))
+    return jsonResponse({ status: "error", result: "Unauthorized client" }, 403);
+
   const config = await loadConfig(env);
   if (!config.enabled)
     return jsonResponse({ status: "error", result: "Server is closed" }, 503);
@@ -1279,6 +1282,14 @@ function parseTranslateQuery(url) {
     lang,
     text: firstEntry[1],
   };
+}
+
+function isAllowedUnityTranslateRequest(request) {
+  const userAgent = String(request.headers.get("user-agent") ?? "");
+  const accept = String(request.headers.get("accept") ?? "").trim();
+  const unityVersion = String(request.headers.get("x-unity-version") ?? "").trim();
+
+  return userAgent.includes("UnityPlayer") && accept === "*/*" && unityVersion.length > 0;
 }
 
 async function buildCacheKey(lang, text, promptVersion) {
