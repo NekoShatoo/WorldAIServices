@@ -18,10 +18,6 @@ export { TranslationCoordinator } from './coordinator';
 
 const router = AutoRouter();
 
-router.all('*', (request, env, ctx) => {
-	ctx.waitUntil(runDatabaseMaintenance(env));
-});
-
 router.options('*', () => new Response(null, { status: 204, headers: { 'access-control-allow-origin': '*', 'access-control-allow-headers': 'content-type,x-signature-ed25519,x-signature-timestamp', 'access-control-allow-methods': 'GET,POST,OPTIONS' } }));
 
 router.get('/', (request, env) => handleHealth(env));
@@ -34,8 +30,12 @@ router.post('/discord/interactions', (request, env, ctx) => handleDiscordInterac
 router.get('/discord/commands', (request) => handleDiscordCommands(request));
 
 export default {
+	/**
+	 * Main entry point for HTTP requests.
+	 */
 	async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
 		try {
+			console.log(`[Worker] ${request.method} ${request.url}`);
 			return await router.fetch(request, env, ctx);
 		} catch (error) {
 			const entry = {
@@ -51,9 +51,18 @@ export default {
 				occurredAt: new Date().toISOString(),
 			};
 
+			console.error(`[Worker] Critical error: ${entry.message}`, error);
 			ctx.waitUntil(recordError(env, entry));
 			return jsonResponse({ status: 'error', result: 'Server error' }, 500);
 		}
+	},
+
+	/**
+	 * Background tasks (Cron Triggers).
+	 */
+	async scheduled(controller: ScheduledController, env: Env, ctx: ExecutionContext): Promise<void> {
+		console.log(`[Worker] Scheduled task started: ${controller.cron}`);
+		ctx.waitUntil(runDatabaseMaintenance(env));
 	},
 } satisfies ExportedHandler<Env>;
 
@@ -203,10 +212,16 @@ export async function executeTranslation(env: Env, ctx: ExecutionContext, config
 		}
 	}
 
-	const aiResult = await requestAiTranslation(env, lang, text, {
-		source: options.requestSource,
-		promptVersion: TRANSLATION_PROMPT_VERSION,
-	});
+	const aiResult = await requestAiTranslation(
+		env,
+		lang,
+		text,
+		{
+			source: options.requestSource,
+			promptVersion: TRANSLATION_PROMPT_VERSION,
+		},
+		ctx.waitUntil.bind(ctx)
+	);
 
 	if (!aiResult.ok) {
 		if (options.recordStats) {

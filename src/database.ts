@@ -401,12 +401,18 @@ export async function listRecentLlmRequests(env: Env, limit: number): Promise<Ll
 export async function runDatabaseMaintenance(env: Env) {
 	const now = Date.now();
 	const db = env.STATE_DB;
-	await db.batch([
-		db.prepare('DELETE FROM translation_cache WHERE cache_key IN (SELECT cache_key FROM translation_cache WHERE expires_at <= ? LIMIT ?)').bind(now, MAINTENANCE_BATCH_SIZE),
-		db.prepare('DELETE FROM rate_limits WHERE window_key IN (SELECT window_key FROM rate_limits WHERE expires_at <= ? LIMIT ?)').bind(now, MAINTENANCE_BATCH_SIZE),
-		db.prepare('DELETE FROM error_logs WHERE error_id IN (SELECT error_id FROM error_logs WHERE expires_at <= ? LIMIT ?)').bind(now, MAINTENANCE_BATCH_SIZE),
-		db.prepare('DELETE FROM llm_request_logs WHERE request_id IN (SELECT request_id FROM llm_request_logs WHERE expires_at <= ? LIMIT ?)').bind(now, MAINTENANCE_BATCH_SIZE),
-	]);
+	console.log(`[DB] Starting maintenance...`);
+	try {
+		await db.batch([
+			db.prepare('DELETE FROM translation_cache WHERE cache_key IN (SELECT cache_key FROM translation_cache WHERE expires_at <= ? LIMIT ?)').bind(now, MAINTENANCE_BATCH_SIZE),
+			db.prepare('DELETE FROM rate_limits WHERE window_key IN (SELECT window_key FROM rate_limits WHERE expires_at <= ? LIMIT ?)').bind(now, MAINTENANCE_BATCH_SIZE),
+			db.prepare('DELETE FROM error_logs WHERE error_id IN (SELECT error_id FROM error_logs WHERE expires_at <= ? LIMIT ?)').bind(now, MAINTENANCE_BATCH_SIZE),
+			db.prepare('DELETE FROM llm_request_logs WHERE request_id IN (SELECT request_id FROM llm_request_logs WHERE expires_at <= ? LIMIT ?)').bind(now, MAINTENANCE_BATCH_SIZE),
+		]);
+		console.log(`[DB] Maintenance completed successfully.`);
+	} catch (error) {
+		console.error(`[DB] Maintenance failed:`, error);
+	}
 }
 
 export async function resetTranslationCache(env: Env, triggeredByUserId: string) {

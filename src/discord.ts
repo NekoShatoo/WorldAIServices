@@ -217,7 +217,7 @@ export async function handleDiscordApplicationCommand(interaction: any, env: Env
 		const pingResult = await requestAiTranslation(env, 'en_US', 'ping', {
 			source: 'discord-ping',
 			promptVersion: TRANSLATION_PROMPT_VERSION,
-		});
+		}, ctx.waitUntil.bind(ctx));
 		return discordMessageResponse(buildDiscordPingMessage(pingResult), false);
 	}
 

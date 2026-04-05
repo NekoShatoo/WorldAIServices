@@ -3,7 +3,22 @@ import { Env, LlmRequestEntry, TranslationOutcome } from './types';
 import { buildTranslationMessages, buildTranslationPromptText, clampInteger, countCharacters, buildPreviewText, safeMetricNumber } from './utils';
 import { recordLlmRequest } from './database';
 
-export async function requestAiTranslation(env: Env, lang: string, text: string, metadata: any = {}): Promise<TranslationOutcome & { result?: string; reason?: string }> {
+/**
+ * Executes a translation request to the configured AI provider.
+ * 
+ * @param env Worker environment bindings.
+ * @param lang Target language code.
+ * @param text Source text to translate.
+ * @param metadata Additional metadata for logging.
+ * @param waitUntil Optional ExecutionContext/State waitUntil to allow non-blocking logging.
+ */
+export async function requestAiTranslation(
+	env: Env,
+	lang: string,
+	text: string,
+	metadata: any = {},
+	waitUntil?: (promise: Promise<any>) => void
+): Promise<TranslationOutcome & { result?: string; reason?: string }> {
 	const mode = env.AI_PROVIDER_MODE === 'openai-chat' ? 'openai-chat' : 'result-json';
 	const promptText = buildTranslationPromptText(lang);
 	const messages = buildTranslationMessages(lang, text);
@@ -11,9 +26,13 @@ export async function requestAiTranslation(env: Env, lang: string, text: string,
 	const startedAt = Date.now();
 
 	const controller = new AbortController();
-	const timerId = setTimeout(() => controller.abort('timeout'), timeoutMs);
+	const timerId = setTimeout(() => {
+		console.warn(`[AI] Request timed out for lang=${lang} after ${timeoutMs}ms`);
+		controller.abort('timeout');
+	}, timeoutMs);
 
 	try {
+		console.log(`[AI] Starting ${mode} request for lang=${lang}, textLength=${countCharacters(text)}`);
 		let result: string;
 		if (mode === 'openai-chat') {
 			if (!env.AI_MODEL) throw new Error('AI_MODEL missing');
@@ -35,12 +54,32 @@ export async function requestAiTranslation(env: Env, lang: string, text: string,
 		}
 
 		const cleaned = result.trim();
-		const succeeded = { ok: true, statusCode: 200, source: 'ai' as const, result: cleaned, latencyMs: Date.now() - startedAt };
-		await recordLlmRequest(env, buildLlmRequestEntry(metadata, mode, lang, text, succeeded));
+		const latencyMs = Date.now() - startedAt;
+		console.log(`[AI] Success: lang=${lang}, latency=${latencyMs}ms`);
+
+		const succeeded = { ok: true, statusCode: 200, source: 'ai' as const, result: cleaned, latencyMs };
+		const logPromise = recordLlmRequest(env, buildLlmRequestEntry(metadata, mode, lang, text, succeeded));
+		
+		if (waitUntil) {
+			waitUntil(logPromise);
+		} else {
+			await logPromise;
+		}
+
 		return succeeded;
 	} catch (error: any) {
-		const failed = buildAiFailureResponse(error, Date.now() - startedAt);
-		await recordLlmRequest(env, buildLlmRequestEntry(metadata, mode, lang, text, failed));
+		const latencyMs = Date.now() - startedAt;
+		console.error(`[AI] Failed: lang=${lang}, error=${error instanceof Error ? error.message : String(error)}`);
+
+		const failed = buildAiFailureResponse(error, latencyMs);
+		const logPromise = recordLlmRequest(env, buildLlmRequestEntry(metadata, mode, lang, text, failed));
+		
+		if (waitUntil) {
+			waitUntil(logPromise);
+		} else {
+			await logPromise;
+		}
+
 		return { ...failed, statusCode: 502, source: 'ai' as const };
 	} finally {
 		clearTimeout(timerId);
