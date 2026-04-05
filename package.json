@@ -1,8 +1,24 @@
 {
-  "name": "world-ai-services",
-  "private": true,
-  "type": "module",
-  "scripts": {
-    "check": "node --check src/index.js && node --check src/discordCommands.js && node --check src/translationPrompt.js && node --check scripts/load-local-config.mjs && node --check scripts/register-discord-commands.mjs && node --check scripts/clear-discord-commands.mjs && node --check scripts/sync-discord-commands.mjs"
-  }
+	"name": "test",
+	"version": "0.0.0",
+	"private": true,
+	"scripts": {
+		"deploy": "wrangler deploy",
+		"dev": "wrangler dev",
+		"start": "wrangler dev",
+		"test": "vitest",
+		"cf-typegen": "wrangler types"
+	},
+	"devDependencies": {
+		"@cloudflare/vitest-pool-workers": "^0.12.4",
+		"@types/node": "^25.5.2",
+		"typescript": "^5.5.2",
+		"vitest": "~3.2.0",
+		"wrangler": "^4.80.0"
+	},
+	"dependencies": {
+		"discord-interactions": "^4.4.0",
+		"itty-router": "^5.0.23",
+		"openai": "^6.33.0"
+	}
 }
