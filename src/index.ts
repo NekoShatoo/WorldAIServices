@@ -5,7 +5,7 @@ import { TRANSLATION_PROMPT_VERSION } from './constants';
 import { loadConfig, getCachedTranslation, runDatabaseMaintenance, recordError, checkRateLimit, recordTranslationStats } from './database';
 import { executeTranslation, recordTranslationOutcome } from './translation';
 import { handleManagerApi } from './manager';
-import { buildManagerPageHtml } from './managerPage';
+import { buildManagerAppPageHtml, buildManagerLoginPageHtml } from './managerPage';
 
 export { TranslationCoordinator } from './coordinator';
 
@@ -20,6 +20,8 @@ router.get('/trans', (request, env, ctx) => handleTranslate(request, env, ctx, n
 
 router.get('/mgr', () => handleManagerPage());
 router.get('/mgr/', () => handleManagerPage());
+router.get('/mgr/app', () => handleManagerAppPage());
+router.get('/mgr/app/', () => handleManagerAppPage());
 router.all('/mgr/api/*', (request, env, ctx) => handleManagerApi(request, env, ctx, new URL(request.url)));
 
 export default {
@@ -140,7 +142,17 @@ function isAllowedUnityTranslateRequest(request: Request) {
 }
 
 function handleManagerPage() {
-	return new Response(buildManagerPageHtml(), {
+	return new Response(buildManagerLoginPageHtml(), {
+		status: 200,
+		headers: {
+			'content-type': 'text/html; charset=UTF-8',
+			'cache-control': 'no-store',
+		},
+	});
+}
+
+function handleManagerAppPage() {
+	return new Response(buildManagerAppPageHtml(), {
 		status: 200,
 		headers: {
 			'content-type': 'text/html; charset=UTF-8',

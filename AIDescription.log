@@ -20,11 +20,17 @@
 - 返却形式は常に `status` + `result`
 
 管理Web仕様（日本語UI）
-- `GET /mgr` で淡い紫系の明色テーマ UI を返す
+- `GET /mgr` はログイン専用ページ
+- `GET /mgr/app` は管理コンソール本体（左右分割レイアウト）
+- 左ペインは Tree View ナビゲーション（Dashboard / サービス設定 / 運用操作 / AIサービス）
+- 初期表示は Dashboard
 - ログイン方式は「パスワードのみ」
 - パスワードは環境変数 `MGR_PASSWORD` を使用
 - ログイン成功時、管理API呼び出し用トークン（短期）を返す
 - 管理APIは `Authorization: Bearer <token>` 必須
+- Dashboard には KPI と Chart.js ベースの統計グラフを表示
+  - 折れ線: cache hit/miss, AI success/failure（当日）
+  - 棒グラフ: 言語別リクエスト数（当日）
 - 主要機能:
   - 現在設定取得 `/mgr/api/status`
   - 設定更新 `/mgr/api/config`
@@ -77,6 +83,7 @@
 - 管理機能は `/mgr` + `/mgr/api/*` に移行した
 - 翻訳実行ロジックは `src/translation.ts` へ分離し、`/trans` と manager simulate で共通利用する
 - 将来の複数管理ページ追加を見据え、manager API を `/mgr/api` に集約した
+- UI を 1 ページ詰め込みから 2 ページ構成へ変更した（ログイン分離 + コンソール分離）
 
 確認済み事項
 - Cloudflare D1 の Worker API は `prepare().bind().first()` / `run()` / `batch()` を利用する
