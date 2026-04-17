@@ -538,6 +538,7 @@ export function buildManagerAppPageHtml() {
       refreshPromotionPrediction();
     });
     [ui.promotionTypeInput, ui.promotionTitleInput, ui.promotionAnchorInput, ui.promotionDescriptionInput, ui.promotionLinkInput, ui.promotionImageInput].forEach((input) => input.addEventListener("input", refreshPromotionPrediction));
+    ui.promotionIdInput.addEventListener("input", refreshPromotionPrediction);
 
     switchPanel("dashboard");
     loadDashboard();
