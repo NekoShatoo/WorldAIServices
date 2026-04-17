@@ -1,106 +1,62 @@
-この Worker は VRChat 用翻訳APIのバックエンドで、Cloudflare Workers + D1 を主保存先として使う構成である。
+この Worker は VRChat 用翻訳APIのバックエンドで、Cloudflare Workers + D1 + Durable Object で構成される。
 
 概要
 - 翻訳API: `GET /trans?{lang}={text}`
-- 管理UI: Discord HTTP Interactions
+- 管理UI: `GET /mgr`（Web 管理画面、本体は Worker が直接返す）
+- 管理API: `/mgr/api/*`（前後分離、画面は API のみ呼び出す）
 - 永続設定/キャッシュ/統計/エラーログ/簡易レート制限: Cloudflare D1
 - 同一翻訳キーの同時実行制御: Cloudflare Durable Object
 - 外部AI: OpenAI 互換 Chat Completions または `result` JSON 形式
-- 翻訳 prompt は `src/translationPrompt.js` の単一ファイルに固定で保持する
 
-翻訳API仕様
-- `/trans` は Unity クライアント想定のヘッダーだけを受け付ける
-- 許可条件は `User-Agent` に `UnityPlayer` を含み、`Accept` が正確に `*/*` で、`X-Unity-Version` が空でないこと
-- Unity のバージョン文字列自体は固定しない。`UnityPlayer/2022.3.22f2-DWR` や `X-Unity-Version: 2022.3.22f2-DWR` のような変化は許容する
-- 条件を満たさない場合は `{ "status": "error", "result": "Unauthorized client" }` を 403 で返す
-- クエリの最初の 1 件を使い、key を言語コード、value を本文として扱う
-- 本文は受信後に `trim()` する
-- trim 後に空文字なら AI を呼ばず `{ "status": "ok", "result": "" }`
-- 返却形式は常に `status` と `result`
-- サービス停止中は `{ "status": "error", "result": "Server is closed" }`
-- AI 側失敗や内部失敗は詳細を隠し `{ "status": "error", "result": "Server error" }`
-- AI 側失敗は英語の原因文字列をそのまま `result` に返す
-- 文字数上限は既定 300。Discord コマンドで変更可能
+翻訳API仕様（既存互換）
+- `/trans` は Unity クライアント想定ヘッダーのみ受け付ける
+- 許可条件は `User-Agent` に `UnityPlayer` を含み、`Accept` が `*/*`、`X-Unity-Version` が空でないこと
+- 条件不一致時は 403 で `{ "status": "error", "result": "Unauthorized client" }`
+- クエリ最初の 1 件を採用し、key を言語コード、value を本文として扱う
+- 本文は `trim()` 後に処理する
+- trim 後が空文字なら AI は呼ばず `{ "status": "ok", "result": "" }`
+- サービス停止時は 503 で `{ "status": "error", "result": "Server is closed" }`
+- 文字数超過時は 400 で `{ "status": "error", "result": "Text too long" }`
+- 返却形式は常に `status` + `result`
+
+管理Web仕様（日本語UI）
+- `GET /mgr` で淡い紫系の明色テーマ UI を返す
+- ログイン方式は「パスワードのみ」
+- パスワードは環境変数 `MGR_PASSWORD` を使用
+- ログイン成功時、管理API呼び出し用トークン（短期）を返す
+- 管理APIは `Authorization: Bearer <token>` 必須
+- 主要機能:
+  - 現在設定取得 `/mgr/api/status`
+  - 設定更新 `/mgr/api/config`
+  - 統計取得 `/mgr/api/stats`
+  - エラー取得 `/mgr/api/errors`
+  - LLM要求履歴取得 `/mgr/api/llmrequests`
+  - AI疎通 `/mgr/api/ping`
+  - 疑似翻訳 `/mgr/api/simulate`
+  - キャッシュ全削除 `/mgr/api/resetcache`
 
 保存方針
-- `service_config` に稼働設定を 1 行で保持する
-- `translation_cache` に翻訳結果を保持し、`expires_at` で有効期限を管理する
-- `translation_stats` は `period_type + period_key + lang` 単位で集計する
-- `error_logs` にエラー履歴を保持する
-- `llm_request_logs` に実際に上流 LLM へ送ったリクエスト履歴を保持する
-- `rate_limits` に 1 分窓ごとの簡易カウンタを保持する
-- D1 には自動 TTL が無いので、各リクエストで期限切れ行を少量ずつ掃除する
+- `service_config` に稼働設定を 1 行で保持
+- `translation_cache` に翻訳結果を保持し `expires_at` で管理
+- `translation_stats` は `period_type + period_key + lang` 単位で集計
+- `error_logs` にエラー履歴を保存
+- `llm_request_logs` に上流 LLM へ送った実リクエスト履歴を保存（cache hit は記録しない）
+- `rate_limits` に 1 分窓の簡易カウンタを保存
+- D1 は TTL 自動削除が無いため、定期/都度メンテで少量削除する
 
 低コスト方針
-- キャッシュ優先。未ヒット時だけ AI を呼ぶ
-- キャッシュキーは `TRANSLATION_PROMPT_VERSION + lang + text` を SHA-256 化して生成する
-- prompt 定義を変えたときは `src/translationPrompt.js` の `TRANSLATION_PROMPT_VERSION` を更新して旧キャッシュを論理的に分離する
-- キャッシュ未命中時は Durable Object が同一 key の in-flight を 1 本に束ねる
-- 同じ `TRANSLATION_PROMPT_VERSION + lang + text` への同時要求は 1 回だけ AI を呼び、残りは同じ結果を待つ
-- `/resetcache` は `translation_cache` のレコードを全削除し、設定・統計・エラーログは消さない
-- レート制限は IP 単位、既定 1 分 6 回
-- レート制限は D1 の単一カウンタ行へ加算し、拒否された回数も同じ窓でカウントされる
+- キャッシュ優先、未ヒット時のみ AI 呼び出し
+- キャッシュキーは `TRANSLATION_PROMPT_VERSION + lang + text` を SHA-256 化
+- 同一キー同時実行は Durable Object で single-flight 化
+- `/mgr/api/simulate` は翻訳APIと同じキャッシュ経路を使うが統計は加算しない
+- `/mgr/api/ping` は上流AIへ実リクエストするため無料ではない
 
 統計
-- 翻訳処理時に日次・月次の集計を D1 に保存する
+- 翻訳処理時に日次・月次で D1 へ保存
 - 日次キー: `YYYY-MM-DD`
 - 月次キー: `YYYY-MM`
-- 時刻基準は JST
+- 時刻基準: JST
 - 集計項目: requests, 平均文字数, cache hit/miss, AI success/failure, 言語別件数
-- 集計は言語別行の合算で表示する
-
-AI 呼び出し
-- 既定サンプルは `AI_PROVIDER_MODE=openai-chat`
-- OpenAI 互換時は `src/translationPrompt.js` から現在言語の prompt 配列を取得し、その末尾に `{ role: "user", content: 本文 }` を追加して送る
-- 対応言語が無い場合は `fallback` を使い、`{{LANG}}` をユーザー入力の言語コードへ置換する
-- OpenAI 互換時の応答本文はそのまま翻訳結果として採用する
-- `AI_PROVIDER_MODE=result-json` のときは prompt 配列を role 付きテキストへ整形したものを `prompt` に使い、応答 JSON の `result` を使う
-- 実際に上流へ送った時だけ `llm_request_logs` に記録する。cache hit は記録しない
-- 記録項目は source, provider_mode, lang, input_chars, prompt_version, status, latency_ms, public_reason, input/output preview である
-
-Discord 連携
-- エンドポイント: `POST /discord/interactions`
-- Discord の Interactions Endpoint URL にはこの URL を設定する
-- `X-Signature-Ed25519` と `X-Signature-Timestamp` を `DISCORD_PUBLIC_KEY` で検証する
-- 応答は ephemeral を使わず、通常メッセージとして返す
-- 常駐 Bot プロセスは使わない
-- 通常メッセージの `@mention` は受け取らない
-- `/help` 実行時は command 一覧の自己修復チェックを裏で走らせる
-- `DISCORD_GUILD_ID` が設定されている運用では、その guild command を現在定義へ揃え、global command は空配列へ戻す
-
-対応 slash command
-- `/help`
-- `/status`
-- `/service action:on|off`
-- `/limit requests_per_minute:<1-60>`
-- `/maxchars value:<1-1000>`
-- `/errors [limit]`
-- `/llmrequests [limit]`
-- `/ping`
-- `/simulate lang:<code> text:<本文>`
-- `/resetcache`
-- `/stats`
-
-権限制御
-- `/help` と `/status` は全員実行可能
-- それ以外は `DISCORD_ADMIN_USER_IDS` に含まれる Discord user id のみ実行可能
-
-重大エラー通知
-- 未処理例外は `error_logs` に記録する
-- `DISCORD_BOT_TOKEN` と `DISCORD_TMP_U_CHANNEL_ID` がある場合だけ Discord API で tmp-u に通知する
-
-ローカルスクリプト
-- `scripts/register-discord-commands.mjs`
-  - command 一覧を登録する
-- `scripts/clear-discord-commands.mjs`
-  - command 一覧を空配列で上書きし、既存 command を全削除する
-- `scripts/sync-discord-commands.mjs`
-  - 通常はこれを使う
-  - `DISCORD_CLEAR_GLOBAL=1` を付けると global command を先に消してから再登録する
-- 各スクリプトの設定読み込み順
-  - `process.env`
-  - `.dev.vars`
-  - `wrangler.toml` の `[vars]`
 
 環境変数
 - Variables
@@ -108,29 +64,21 @@ Discord 連携
   - `AI_TIMEOUT_MS`
   - `AI_API_URL`
   - `AI_MODEL`
-  - `DISCORD_PUBLIC_KEY`
-  - `DISCORD_APPLICATION_ID`
-  - `DISCORD_GUILD_ID`
-  - `DISCORD_ADMIN_USER_IDS`
-  - `DISCORD_TMP_U_CHANNEL_ID`
+  - `MGR_PASSWORD`
 - Secrets
   - `AI_API_KEY`
-  - `DISCORD_BOT_TOKEN`
 
 設定方針
-- runtime 変数は `wrangler.toml` に固定せず、Cloudflare Dashboard の Variables / Secrets を正本とする
-- `wrangler.toml` には Worker 固定設定、D1 binding、Durable Object binding / migration を残す
+- runtime 変数は `wrangler.jsonc` に固定せず、Cloudflare Dashboard の Variables / Secrets を正本とする
+- `wrangler.jsonc` には Worker 固定設定、D1 binding、Durable Object binding / migration を残す
 
-実装上の注意
-- `service_config` に設定が無い場合は既定値を使う
-- prompt の実体は `src/translationPrompt.js` のみを正本とし、Discord や DB からは変更しない
-- D1 の期限切れ掃除は `translation_cache` / `rate_limits` / `error_logs` / `llm_request_logs` を都度少量削除する
+今回の実装変更メモ
+- Discord 管理ルートと Discord 依存を完全撤去した
+- 管理機能は `/mgr` + `/mgr/api/*` に移行した
+- 翻訳実行ロジックは `src/translation.ts` へ分離し、`/trans` と manager simulate で共通利用する
+- 将来の複数管理ページ追加を見据え、manager API を `/mgr/api` に集約した
 
 確認済み事項
-- Cloudflare D1 の Worker API は `prepare().bind().first()` / `run()` / `batch()` を使う
-- D1 の 1 invocation あたり query 上限はプラン依存で、Free は 50、Paid は 1000
-- `wrangler.toml` の D1 binding は `[[d1_databases]]` と `migrations_dir` を使う
-- `@mention` ではコマンド実行できない。復旧や command 再登録はローカルスクリプトで行う
-- Git 自動デプロイで Dashboard 側設定を壊さないよう、repo から runtime `[vars]` は外した
-- `/ping` は上流 AI へ実リクエストを 1 回送るので、無料ではない
-- `/simulate` は HTTP 翻訳APIと同じキャッシュ経路を通すが、統計には加算しない
+- Cloudflare D1 の Worker API は `prepare().bind().first()` / `run()` / `batch()` を利用する
+- D1 の 1 invocation あたり query 上限はプラン依存で Free 50 / Paid 1000
+- `wrangler.jsonc` の D1 binding は `d1_databases` と `migrations_dir` を利用する

@@ -1,11 +1,7 @@
 export interface Env {
 	STATE_DB: D1Database;
 	TRANSLATION_COORDINATOR: DurableObjectNamespace<import('./coordinator').TranslationCoordinator>;
-	DISCORD_PUBLIC_KEY: string;
-	DISCORD_BOT_TOKEN: string;
-	DISCORD_APPLICATION_ID: string;
-	DISCORD_GUILD_ID?: string;
-	DISCORD_ADMIN_USER_IDS?: string;
+	MGR_PASSWORD: string;
 	AI_PROVIDER_MODE?: string;
 	AI_TIMEOUT_MS?: string;
 	AI_API_URL: string;
@@ -51,6 +47,14 @@ export interface TranslationOutcome {
 	result?: string;
 	publicReason?: string;
 	reason?: string;
+}
+
+export interface ExecuteTranslationOptions {
+	requestSource: string;
+	useCache: boolean;
+	writeCache: boolean;
+	useSingleFlight: boolean;
+	recordStats?: boolean;
 }
 
 export interface LlmRequestEntry {

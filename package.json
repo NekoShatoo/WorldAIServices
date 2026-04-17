@@ -17,7 +17,6 @@
 		"wrangler": "^4.80.0"
 	},
 	"dependencies": {
-		"discord-interactions": "^4.4.0",
 		"itty-router": "^5.0.23",
 		"openai": "^6.33.0"
 	}

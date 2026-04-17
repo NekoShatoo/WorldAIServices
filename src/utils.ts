@@ -2,18 +2,13 @@ import { TRANSLATION_PROMPTS } from './constants';
 
 export const JSON_HEADERS = {
 	'access-control-allow-origin': '*',
-	'access-control-allow-headers': 'content-type,x-signature-ed25519,x-signature-timestamp',
+	'access-control-allow-headers': 'authorization,content-type,x-signature-ed25519,x-signature-timestamp,x-unity-version',
 	'access-control-allow-methods': 'GET,POST,OPTIONS',
 	'cache-control': 'no-store',
 	'content-type': 'application/json; charset=UTF-8',
 };
 
 export const MAINTENANCE_BATCH_SIZE = 500;
-export const DISCORD_MESSAGE_FLAGS_EPHEMERAL = 1 << 6;
-export const DISCORD_INTERACTION_TYPE_PING = 1;
-export const DISCORD_INTERACTION_TYPE_APPLICATION_COMMAND = 2;
-export const DISCORD_INTERACTION_RESPONSE_PONG = 1;
-export const DISCORD_INTERACTION_RESPONSE_CHANNEL_MESSAGE = 4;
 
 export function jsonResponse(data: any, status = 200) {
 	return new Response(JSON.stringify(data), {
