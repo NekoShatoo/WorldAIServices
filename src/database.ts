@@ -432,8 +432,27 @@ export async function resetTranslationCache(env: Env, triggeredByUserId: string)
 	});
 }
 
-export async function listPromotionItems(env: Env) {
-	const result = await env.STATE_DB.prepare(
+export async function listPromotionItems(env: Env, itemType?: PromotionItemType) {
+	const result =
+		itemType === 'Avatar' || itemType === 'World'
+			? await env.STATE_DB.prepare(
+					`SELECT
+      id,
+      item_type,
+      title,
+      anchor,
+      description,
+      link,
+      image,
+      updated_at,
+      display_order
+    FROM promotion_list_items
+    WHERE item_type = ?
+    ORDER BY display_order ASC, updated_at DESC, id ASC`
+				)
+					.bind(itemType)
+					.all<any>()
+			: await env.STATE_DB.prepare(
 		`SELECT
       id,
       item_type,
@@ -442,10 +461,11 @@ export async function listPromotionItems(env: Env) {
       description,
       link,
       image,
-      updated_at
+      updated_at,
+      display_order
     FROM promotion_list_items
-    ORDER BY item_type ASC, updated_at DESC`
-	).all<any>();
+    ORDER BY item_type ASC, display_order ASC, updated_at DESC, id ASC`
+			).all<any>();
 	return (result.results ?? []).map((row) => ({
 		ID: String(row.id ?? ''),
 		Type: String(row.item_type ?? '') as PromotionItemType,
@@ -455,6 +475,7 @@ export async function listPromotionItems(env: Env) {
 		Link: String(row.link ?? ''),
 		Image: String(row.image ?? ''),
 		UpdatedAt: String(row.updated_at ?? ''),
+		DisplayOrder: safeMetricNumber(row.display_order),
 	}));
 }
 
@@ -469,6 +490,14 @@ export async function createPromotionItem(
 	if (expected > PROMOTION_LIST_MAX_BYTES) return { ok: false as const, reason: 'payload_limit_exceeded', expectedBytes: expected };
 
 	const now = new Date().toISOString();
+	const orderRow = await env.STATE_DB.prepare(
+		`SELECT COALESCE(MAX(display_order), 0) + 1 AS next_order
+    FROM promotion_list_items
+    WHERE item_type = ?`
+	)
+		.bind(itemType)
+		.first<any>();
+	const nextOrder = Math.max(1, safeMetricNumber(orderRow?.next_order));
 	await env.STATE_DB.prepare(
 		`INSERT INTO promotion_list_items (
       id,
@@ -478,11 +507,12 @@ export async function createPromotionItem(
       description,
       link,
       image,
+      display_order,
       created_at,
       updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
 	)
-		.bind(payload.ID, itemType, payload.Title, payload.Anchor, payload.Description, payload.Link, payload.Image, now, now)
+		.bind(payload.ID, itemType, payload.Title, payload.Anchor, payload.Description, payload.Link, payload.Image, nextOrder, now, now)
 		.run();
 
 	const summary = await rebuildPromotionListCache(env);
@@ -521,6 +551,38 @@ export async function updatePromotionItem(
 
 	const summary = await rebuildPromotionListCache(env);
 	return { ok: true as const, summary };
+}
+
+export async function movePromotionItem(env: Env, id: string, direction: 'up' | 'down') {
+	const current = await env.STATE_DB.prepare(
+		`SELECT id, item_type, display_order
+    FROM promotion_list_items
+    WHERE id = ?`
+	)
+		.bind(id)
+		.first<any>();
+	if (!current) return { ok: false as const, reason: 'not_found' };
+
+	const comparator = direction === 'up' ? '<' : '>';
+	const orderBy = direction === 'up' ? 'display_order DESC' : 'display_order ASC';
+	const swapTarget = await env.STATE_DB.prepare(
+		`SELECT id, display_order
+    FROM promotion_list_items
+    WHERE item_type = ? AND display_order ${comparator} ?
+    ORDER BY ${orderBy}
+    LIMIT 1`
+	)
+		.bind(current.item_type, current.display_order)
+		.first<any>();
+	if (!swapTarget) return { ok: true as const, summary: await rebuildPromotionListCache(env) };
+
+	const now = new Date().toISOString();
+	await env.STATE_DB.batch([
+		env.STATE_DB.prepare('UPDATE promotion_list_items SET display_order = ?, updated_at = ? WHERE id = ?').bind(swapTarget.display_order, now, current.id),
+		env.STATE_DB.prepare('UPDATE promotion_list_items SET display_order = ?, updated_at = ? WHERE id = ?').bind(current.display_order, now, swapTarget.id),
+	]);
+
+	return { ok: true as const, summary: await rebuildPromotionListCache(env) };
 }
 
 export async function getPromotionListPayload(env: Env): Promise<PromotionPayload> {
@@ -586,7 +648,7 @@ async function buildPromotionPayloadFromItems(env: Env): Promise<PromotionPayloa
       link,
       image
     FROM promotion_list_items
-    ORDER BY item_type ASC, updated_at DESC`
+    ORDER BY item_type ASC, display_order ASC, updated_at DESC, id ASC`
 	).all<any>();
 	const payload: PromotionPayload = { Avatar: [], World: [] };
 	for (const row of result.results ?? []) {

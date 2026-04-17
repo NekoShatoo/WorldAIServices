@@ -48,6 +48,7 @@
   - PromotionList 追加 `/mgr/api/promotion/items`
   - PromotionList 更新 `/mgr/api/promotion/items/update`
   - PromotionList 削除 `/mgr/api/promotion/items/delete`
+  - PromotionList 順序移動 `/mgr/api/promotion/items/move`（up/down）
   - サービス説明取得 `/mgr/api/docs/ai` / `/mgr/api/docs/promotion`
 
 PromotionList 仕様
@@ -66,6 +67,9 @@ PromotionList 仕様
 - 管理画面で画像ファイルを選択すると、フロントで Base64 化して `Image` に設定する
 - 管理画面の PromotionList は常時入力フォームを表示せず、追加/編集時のみモーダルでフォームを開く
 - PromotionList 項目管理は CRUD（一覧/追加/編集/削除）を提供する
+- 一覧取得は type を指定して 1 種類のみ表示する（Avatar か World の Selection）
+- 追加時は `ID` のみ必須。その他フィールドは空文字を許可する
+- 管理画面で上下移動すると display_order が入れ替わり、公開 `GET /PromotionList` の配列順にも反映される
 - JSON 全体サイズ上限は 100MB
 - 追加時はフロントで増分サイズを予測し、100MB 超過見込みなら送信前に拒否する
 - バックエンドでも上限を二重チェックし、超過時は登録を拒否する
@@ -78,6 +82,7 @@ PromotionList 仕様
 - `llm_request_logs` に上流 LLM へ送った実リクエスト履歴を保存（cache hit は記録しない）
 - `rate_limits` に 1 分窓の簡易カウンタを保存
 - `promotion_list_items` に PromotionList 項目を保存する
+  - `display_order` で各 type 内の順序を保持する
 - `promotion_list_cache` / `promotion_list_cache_chunks` に公開用 JSON キャッシュを保存する
 - D1 は TTL 自動削除が無いため、定期/都度メンテで少量削除する
 

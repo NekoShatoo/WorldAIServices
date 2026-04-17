@@ -10,6 +10,7 @@ import {
 	createPromotionItem,
 	deletePromotionItem,
 	updatePromotionItem,
+	movePromotionItem,
 } from './database';
 import { TRANSLATION_PROMPT_VERSION } from './constants';
 import { jsonResponse, clampInteger, countCharacters } from './utils';
@@ -180,7 +181,9 @@ export async function handleManagerApi(request: Request, env: Env, ctx: Executio
 	}
 
 	if (path === '/promotion/items' && request.method === 'GET') {
-		return jsonResponse({ status: 'ok', result: await listPromotionItems(env) });
+		const type = String(url.searchParams.get('type') ?? '') as PromotionItemType;
+		if (type && type !== 'Avatar' && type !== 'World') return jsonResponse({ status: 'error', result: 'type は Avatar または World を指定してください。' }, 400);
+		return jsonResponse({ status: 'ok', result: await listPromotionItems(env, type || undefined) });
 	}
 
 	if (path === '/promotion/items' && request.method === 'POST') {
@@ -196,9 +199,7 @@ export async function handleManagerApi(request: Request, env: Env, ctx: Executio
 			Link: String(body?.item?.Link ?? '').trim(),
 			Image: String(body?.item?.Image ?? '').trim(),
 		};
-		if (!payload.ID || !payload.Title || !payload.Anchor || !payload.Description || !payload.Link || !payload.Image) {
-			return jsonResponse({ status: 'error', result: '必須項目が不足しています。' }, 400);
-		}
+		if (!payload.ID) return jsonResponse({ status: 'error', result: 'ID は必須です。' }, 400);
 
 		const predictedBytes = clampInteger(Number(body?.predictedBytes), 0, 200000000, 0);
 		try {
@@ -239,9 +240,7 @@ export async function handleManagerApi(request: Request, env: Env, ctx: Executio
 			Link: String(body?.item?.Link ?? '').trim(),
 			Image: String(body?.item?.Image ?? '').trim(),
 		};
-		if (!payload.Title || !payload.Anchor || !payload.Description || !payload.Link || !payload.Image) {
-			return jsonResponse({ status: 'error', result: '必須項目が不足しています。' }, 400);
-		}
+		if (!payload.ID) return jsonResponse({ status: 'error', result: 'ID は必須です。' }, 400);
 
 		const predictedBytes = clampInteger(Number(body?.predictedBytes), 0, 200000000, 0);
 		try {
@@ -254,6 +253,17 @@ export async function handleManagerApi(request: Request, env: Env, ctx: Executio
 			}
 			throw error;
 		}
+	}
+
+	if (path === '/promotion/items/move' && request.method === 'POST') {
+		const body = await readJsonBody(request);
+		const id = String(body?.id ?? '').trim();
+		const direction = String(body?.direction ?? '');
+		if (id.length === 0) return jsonResponse({ status: 'error', result: 'id を指定してください。' }, 400);
+		if (direction !== 'up' && direction !== 'down') return jsonResponse({ status: 'error', result: 'direction は up/down を指定してください。' }, 400);
+		const moved = await movePromotionItem(env, id, direction);
+		if (!moved.ok) return jsonResponse({ status: 'error', result: 'not_found' }, 404);
+		return jsonResponse({ status: 'ok', result: moved.summary });
 	}
 
 	if (path === '/docs/ai' && request.method === 'GET') {

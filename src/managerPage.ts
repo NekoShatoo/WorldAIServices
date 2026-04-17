@@ -162,6 +162,10 @@ export function buildManagerAppPageHtml() {
         <div class="flex items-center justify-between">
           <h2 class="text-xl font-bold">PromotionList / 項目管理</h2>
           <div class="flex gap-2">
+            <select id="promotionFilterType" class="px-3 py-2 rounded-xl border border-[color:var(--mgr-border)] bg-white text-sm">
+              <option value="Avatar">Avatar</option>
+              <option value="World">World</option>
+            </select>
             <button id="promotionCreateOpenButton" class="px-4 py-2 rounded-xl bg-violet-600 text-white font-semibold hover:bg-violet-500">新規追加</button>
             <button id="promotionReloadButton" class="px-4 py-2 rounded-xl bg-violet-100 text-violet-700 font-semibold">一覧再読込</button>
           </div>
@@ -256,6 +260,7 @@ export function buildManagerAppPageHtml() {
       promotionItemsList: document.getElementById("promotionItemsList"),
       promotionCreateOpenButton: document.getElementById("promotionCreateOpenButton"),
       promotionReloadButton: document.getElementById("promotionReloadButton"),
+      promotionFilterType: document.getElementById("promotionFilterType"),
       docsAiBody: document.getElementById("docsAiBody"),
       docsPromotionBody: document.getElementById("docsPromotionBody"),
       promotionModal: document.getElementById("promotionModal"),
@@ -355,7 +360,7 @@ export function buildManagerAppPageHtml() {
         return;
       }
       ui.promotionItemsList.innerHTML = state.promotionItems.map((item) => {
-        return '<div class="card p-3"><div class="flex items-center justify-between gap-2"><div><p class="font-semibold">' + item.Type + ' / ' + item.Title + '</p><p class="text-xs text-[color:var(--mgr-muted)]">ID: ' + item.ID + '</p></div><div class="flex gap-2"><button class="px-2 py-1 rounded bg-violet-100 text-violet-700 text-xs" data-promotion-edit="' + item.ID + '">編集</button><button class="px-2 py-1 rounded bg-red-100 text-red-700 text-xs" data-promotion-delete="' + item.ID + '">削除</button></div></div><p class="text-xs mt-2 text-[color:var(--mgr-muted)]">' + item.Description + '</p></div>';
+        return '<div class="card p-3"><div class="flex items-center justify-between gap-2"><div><p class="font-semibold">' + item.Type + ' / ' + (item.Title || "(no title)") + '</p><p class="text-xs text-[color:var(--mgr-muted)]">ID: ' + item.ID + '</p></div><div class="flex gap-2"><button class="px-2 py-1 rounded bg-violet-100 text-violet-700 text-xs" data-promotion-up="' + item.ID + '">↑</button><button class="px-2 py-1 rounded bg-violet-100 text-violet-700 text-xs" data-promotion-down="' + item.ID + '">↓</button><button class="px-2 py-1 rounded bg-violet-100 text-violet-700 text-xs" data-promotion-edit="' + item.ID + '">編集</button><button class="px-2 py-1 rounded bg-red-100 text-red-700 text-xs" data-promotion-delete="' + item.ID + '">削除</button></div></div><p class="text-xs mt-2 text-[color:var(--mgr-muted)]">' + (item.Description || "(no description)") + '</p></div>';
       }).join("");
       Array.from(ui.promotionItemsList.querySelectorAll("[data-promotion-delete]")).forEach((button) => {
         button.addEventListener("click", async () => {
@@ -374,6 +379,22 @@ export function buildManagerAppPageHtml() {
           openPromotionModal("edit", item);
         });
       });
+      Array.from(ui.promotionItemsList.querySelectorAll("[data-promotion-up]")).forEach((button) => {
+        button.addEventListener("click", async () => {
+          const id = button.getAttribute("data-promotion-up");
+          if (!id) return;
+          await callApi("/promotion/items/move", { method: "POST", body: JSON.stringify({ id, direction: "up" }) });
+          await loadPromotionData();
+        });
+      });
+      Array.from(ui.promotionItemsList.querySelectorAll("[data-promotion-down]")).forEach((button) => {
+        button.addEventListener("click", async () => {
+          const id = button.getAttribute("data-promotion-down");
+          if (!id) return;
+          await callApi("/promotion/items/move", { method: "POST", body: JSON.stringify({ id, direction: "down" }) });
+          await loadPromotionData();
+        });
+      });
     }
 
     async function loadPromotionData() {
@@ -382,7 +403,8 @@ export function buildManagerAppPageHtml() {
         state.promotionUsage = usageResult.result;
         renderPromotionUsage();
       }
-      const itemsResult = (await callApi("/promotion/items")).data;
+      const selectedType = ui.promotionFilterType.value;
+      const itemsResult = (await callApi("/promotion/items?type=" + encodeURIComponent(selectedType))).data;
       if (itemsResult.status === "ok") {
         state.promotionItems = itemsResult.result;
         renderPromotionItems();
@@ -407,6 +429,7 @@ export function buildManagerAppPageHtml() {
         resetPromotionForm();
         ui.promotionModalTitle.textContent = "PromotionList 追加";
         ui.promotionIdInput.disabled = false;
+        ui.promotionTypeInput.value = ui.promotionFilterType.value;
       } else {
         ui.promotionModalTitle.textContent = "PromotionList 編集";
         state.promotionEditingId = item.ID;
@@ -425,6 +448,7 @@ export function buildManagerAppPageHtml() {
 
     function closePromotionModal() {
       ui.promotionModal.classList.add("hidden");
+      resetPromotionForm();
     }
 
     async function submitPromotionModal() {
@@ -497,6 +521,7 @@ export function buildManagerAppPageHtml() {
     ui.promotionCreateOpenButton.addEventListener("click", () => openPromotionModal("create"));
     ui.promotionReloadButton.addEventListener("click", loadPromotionData);
     ui.refreshPromotionUsageButton.addEventListener("click", loadPromotionData);
+    ui.promotionFilterType.addEventListener("change", loadPromotionData);
     ui.promotionModalCloseButton.addEventListener("click", closePromotionModal);
     ui.promotionModalCancelButton.addEventListener("click", closePromotionModal);
     ui.promotionModalSubmitButton.addEventListener("click", submitPromotionModal);
