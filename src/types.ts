@@ -97,3 +97,19 @@ export interface TranslationStatsSummary {
 	day: TranslationStatsRecord;
 	month: TranslationStatsRecord;
 }
+
+export type PromotionItemType = 'Avatar' | 'World';
+
+export interface PromotionItem {
+	ID: string;
+	Title: string;
+	Anchor: string;
+	Description: string;
+	Link: string;
+	Image: string;
+}
+
+export interface PromotionPayload {
+	Avatar: PromotionItem[];
+	World: PromotionItem[];
+}

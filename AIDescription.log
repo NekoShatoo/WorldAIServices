@@ -2,6 +2,7 @@
 
 概要
 - 翻訳API: `GET /trans?{lang}={text}`
+- PromotionList API: `GET /PromotionList`
 - 管理UI: `GET /mgr`（Web 管理画面、本体は Worker が直接返す）
 - 管理API: `/mgr/api/*`（前後分離、画面は API のみ呼び出す）
 - 永続設定/キャッシュ/統計/エラーログ/簡易レート制限: Cloudflare D1
@@ -22,7 +23,9 @@
 管理Web仕様（日本語UI）
 - `GET /mgr` はログイン専用ページ
 - `GET /mgr/app` は管理コンソール本体（左右分割レイアウト）
-- 左ペインは Tree View ナビゲーション（Dashboard / サービス設定 / 運用操作 / AIサービス）
+- 左ペインは Tree View ナビゲーションで、Dashboard が最上位、他はサービス配下
+  - AIサービス: サービス設定 / 運用操作 / AI疎通 / 説明ページ
+  - PromotionList: 項目管理 / 説明ページ
 - 初期表示は Dashboard
 - ログイン方式は「パスワードのみ」
 - パスワードは環境変数 `MGR_PASSWORD` を使用
@@ -40,6 +43,29 @@
   - AI疎通 `/mgr/api/ping`
   - 疑似翻訳 `/mgr/api/simulate`
   - キャッシュ全削除 `/mgr/api/resetcache`
+  - PromotionList 使用率取得 `/mgr/api/promotion/usage`
+  - PromotionList 一覧取得 `/mgr/api/promotion/items`
+  - PromotionList 追加 `/mgr/api/promotion/items`
+  - PromotionList 削除 `/mgr/api/promotion/items/delete`
+  - サービス説明取得 `/mgr/api/docs/ai` / `/mgr/api/docs/promotion`
+
+PromotionList 仕様
+- 公開API: `GET /PromotionList`
+- 返却値は同一構造の辞書 JSON:
+  - `Avatar: PromotionItem[]`
+  - `World: PromotionItem[]`
+- `PromotionItem` の構造:
+  - `Title`
+  - `Anchor`
+  - `Description`
+  - `Link`
+  - `ID`
+  - `Image`（Base64）
+- 公開APIのレスポンスは毎回 DB 集計せず、管理画面更新時に再生成したキャッシュ JSON を返す
+- 管理画面で画像ファイルを選択すると、フロントで Base64 化して `Image` に設定する
+- JSON 全体サイズ上限は 100MB
+- 追加時はフロントで増分サイズを予測し、100MB 超過見込みなら送信前に拒否する
+- バックエンドでも上限を二重チェックし、超過時は登録を拒否する
 
 保存方針
 - `service_config` に稼働設定を 1 行で保持
@@ -48,6 +74,8 @@
 - `error_logs` にエラー履歴を保存
 - `llm_request_logs` に上流 LLM へ送った実リクエスト履歴を保存（cache hit は記録しない）
 - `rate_limits` に 1 分窓の簡易カウンタを保存
+- `promotion_list_items` に PromotionList 項目を保存する
+- `promotion_list_cache` / `promotion_list_cache_chunks` に公開用 JSON キャッシュを保存する
 - D1 は TTL 自動削除が無いため、定期/都度メンテで少量削除する
 
 低コスト方針
@@ -84,6 +112,8 @@
 - 翻訳実行ロジックは `src/translation.ts` へ分離し、`/trans` と manager simulate で共通利用する
 - 将来の複数管理ページ追加を見据え、manager API を `/mgr/api` に集約した
 - UI を 1 ページ詰め込みから 2 ページ構成へ変更した（ログイン分離 + コンソール分離）
+- PromotionList サービスを追加し、管理画面から Avatar / World 項目を追加・削除できるようにした
+- 公開 `GET /PromotionList` を追加し、キャッシュ済み JSON を返す構成にした
 
 確認済み事項
 - Cloudflare D1 の Worker API は `prepare().bind().first()` / `run()` / `batch()` を利用する

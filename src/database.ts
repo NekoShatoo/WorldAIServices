@@ -1,4 +1,4 @@
-import { Env, ServiceConfig, TranslationMetric, TranslationStatsSummary, TranslationStatsRecord, ErrorEntry, LlmRequestEntry } from './types';
+import { Env, ServiceConfig, TranslationMetric, TranslationStatsSummary, TranslationStatsRecord, ErrorEntry, LlmRequestEntry, PromotionItem, PromotionItemType, PromotionPayload } from './types';
 import { clampInteger, safeMetricNumber, parseStoredJsonObject, MAINTENANCE_BATCH_SIZE } from './utils';
 
 export const DEFAULT_CONFIG: ServiceConfig = Object.freeze({
@@ -8,6 +8,8 @@ export const DEFAULT_CONFIG: ServiceConfig = Object.freeze({
 	cacheTtlSeconds: 60 * 60 * 24 * 180,
 	errorRetentionSeconds: 60 * 60 * 24 * 14,
 });
+const PROMOTION_LIST_MAX_BYTES = 100 * 1024 * 1024;
+const PROMOTION_LIST_CHUNK_SIZE = 900000;
 
 export async function loadConfig(env: Env): Promise<ServiceConfig> {
 	const db = env.STATE_DB;
@@ -428,4 +430,176 @@ export async function resetTranslationCache(env: Env, triggeredByUserId: string)
 		details: { deletedCount, triggeredByUserId },
 		occurredAt: new Date().toISOString(),
 	});
+}
+
+export async function listPromotionItems(env: Env) {
+	const result = await env.STATE_DB.prepare(
+		`SELECT
+      id,
+      item_type,
+      title,
+      anchor,
+      description,
+      link,
+      image,
+      updated_at
+    FROM promotion_list_items
+    ORDER BY item_type ASC, updated_at DESC`
+	).all<any>();
+	return (result.results ?? []).map((row) => ({
+		ID: String(row.id ?? ''),
+		Type: String(row.item_type ?? '') as PromotionItemType,
+		Title: String(row.title ?? ''),
+		Anchor: String(row.anchor ?? ''),
+		Description: String(row.description ?? ''),
+		Link: String(row.link ?? ''),
+		Image: String(row.image ?? ''),
+		UpdatedAt: String(row.updated_at ?? ''),
+	}));
+}
+
+export async function createPromotionItem(
+	env: Env,
+	itemType: PromotionItemType,
+	payload: PromotionItem,
+	predictedPayloadBytes: number
+) {
+	const current = await loadPromotionPayloadBytes(env);
+	const expected = current + Math.max(0, Math.floor(predictedPayloadBytes));
+	if (expected > PROMOTION_LIST_MAX_BYTES) return { ok: false as const, reason: 'payload_limit_exceeded', expectedBytes: expected };
+
+	const now = new Date().toISOString();
+	await env.STATE_DB.prepare(
+		`INSERT INTO promotion_list_items (
+      id,
+      item_type,
+      title,
+      anchor,
+      description,
+      link,
+      image,
+      created_at,
+      updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+	)
+		.bind(payload.ID, itemType, payload.Title, payload.Anchor, payload.Description, payload.Link, payload.Image, now, now)
+		.run();
+
+	const summary = await rebuildPromotionListCache(env);
+	return { ok: true as const, summary };
+}
+
+export async function deletePromotionItem(env: Env, id: string) {
+	await env.STATE_DB.prepare('DELETE FROM promotion_list_items WHERE id = ?').bind(id).run();
+	return await rebuildPromotionListCache(env);
+}
+
+export async function getPromotionListPayload(env: Env): Promise<PromotionPayload> {
+	const payloadText = await loadPromotionPayloadText(env);
+	try {
+		const parsed = JSON.parse(payloadText);
+		if (!parsed || typeof parsed !== 'object') return { Avatar: [], World: [] };
+		return {
+			Avatar: Array.isArray((parsed as any).Avatar) ? (parsed as any).Avatar : [],
+			World: Array.isArray((parsed as any).World) ? (parsed as any).World : [],
+		};
+	} catch {
+		return { Avatar: [], World: [] };
+	}
+}
+
+export async function getPromotionListUsage(env: Env) {
+	const bytes = await loadPromotionPayloadBytes(env);
+	return {
+		usedBytes: bytes,
+		maxBytes: PROMOTION_LIST_MAX_BYTES,
+		usedPercent: Math.min(100, Number(((bytes / PROMOTION_LIST_MAX_BYTES) * 100).toFixed(2))),
+	};
+}
+
+export async function rebuildPromotionListCache(env: Env) {
+	const payload = await buildPromotionPayloadFromItems(env);
+	const payloadText = JSON.stringify(payload);
+	const payloadBytes = new TextEncoder().encode(payloadText).length;
+	if (payloadBytes > PROMOTION_LIST_MAX_BYTES) throw new Error('promotion_payload_limit_exceeded');
+
+	const chunks = splitPromotionPayload(payloadText);
+	const db = env.STATE_DB;
+	await db.prepare('DELETE FROM promotion_list_cache_chunks').run();
+	const statements = chunks.map((chunk, index) => db.prepare('INSERT INTO promotion_list_cache_chunks (chunk_index, chunk_text) VALUES (?, ?)').bind(index, chunk));
+	await db.batch(statements);
+	await db.prepare(
+		`INSERT INTO promotion_list_cache (
+      cache_id,
+      payload_total_bytes,
+      payload_updated_at
+    ) VALUES (1, ?, ?)
+    ON CONFLICT(cache_id) DO UPDATE SET
+      payload_total_bytes = excluded.payload_total_bytes,
+      payload_updated_at = excluded.payload_updated_at`
+	)
+		.bind(payloadBytes, new Date().toISOString())
+		.run();
+	return {
+		payloadBytes,
+		chunkCount: chunks.length,
+	};
+}
+
+async function buildPromotionPayloadFromItems(env: Env): Promise<PromotionPayload> {
+	const result = await env.STATE_DB.prepare(
+		`SELECT
+      id,
+      item_type,
+      title,
+      anchor,
+      description,
+      link,
+      image
+    FROM promotion_list_items
+    ORDER BY item_type ASC, updated_at DESC`
+	).all<any>();
+	const payload: PromotionPayload = { Avatar: [], World: [] };
+	for (const row of result.results ?? []) {
+		const item = {
+			ID: String(row.id ?? ''),
+			Title: String(row.title ?? ''),
+			Anchor: String(row.anchor ?? ''),
+			Description: String(row.description ?? ''),
+			Link: String(row.link ?? ''),
+			Image: String(row.image ?? ''),
+		};
+		const type = String(row.item_type ?? '');
+		if (type === 'Avatar') payload.Avatar.push(item);
+		if (type === 'World') payload.World.push(item);
+	}
+	return payload;
+}
+
+async function loadPromotionPayloadText(env: Env) {
+	const result = await env.STATE_DB.prepare(
+		`SELECT chunk_text
+    FROM promotion_list_cache_chunks
+    ORDER BY chunk_index ASC`
+	).all<any>();
+	const chunks = (result.results ?? []).map((row) => String(row.chunk_text ?? ''));
+	return chunks.join('');
+}
+
+async function loadPromotionPayloadBytes(env: Env) {
+	const row = await env.STATE_DB.prepare(
+		`SELECT payload_total_bytes
+    FROM promotion_list_cache
+    WHERE cache_id = 1`
+	).first<any>();
+	return safeMetricNumber(row?.payload_total_bytes);
+}
+
+function splitPromotionPayload(payloadText: string) {
+	if (payloadText.length <= PROMOTION_LIST_CHUNK_SIZE) return [payloadText];
+	const chunks: string[] = [];
+	for (let index = 0; index < payloadText.length; index += PROMOTION_LIST_CHUNK_SIZE) {
+		chunks.push(payloadText.slice(index, index + PROMOTION_LIST_CHUNK_SIZE));
+	}
+	return chunks;
 }

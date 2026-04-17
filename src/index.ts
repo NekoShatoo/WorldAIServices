@@ -2,7 +2,7 @@ import { AutoRouter } from 'itty-router';
 import { Env } from './types';
 import { jsonResponse, countCharacters, buildCacheKey } from './utils';
 import { TRANSLATION_PROMPT_VERSION } from './constants';
-import { loadConfig, getCachedTranslation, runDatabaseMaintenance, recordError, checkRateLimit, recordTranslationStats } from './database';
+import { loadConfig, getCachedTranslation, runDatabaseMaintenance, recordError, checkRateLimit, recordTranslationStats, getPromotionListPayload } from './database';
 import { executeTranslation, recordTranslationOutcome } from './translation';
 import { handleManagerApi } from './manager';
 import { buildManagerAppPageHtml, buildManagerLoginPageHtml } from './managerPage';
@@ -17,6 +17,7 @@ router.get('/', (request, env) => handleHealth(env));
 router.get('/health', (request, env) => handleHealth(env));
 
 router.get('/trans', (request, env, ctx) => handleTranslate(request, env, ctx, new URL(request.url)));
+router.get('/PromotionList', (request, env) => handlePromotionList(env));
 
 router.get('/mgr', () => handleManagerPage());
 router.get('/mgr/', () => handleManagerPage());
@@ -159,4 +160,8 @@ function handleManagerAppPage() {
 			'cache-control': 'no-store',
 		},
 	});
+}
+
+async function handlePromotionList(env: Env) {
+	return jsonResponse(await getPromotionListPayload(env));
 }

@@ -1,9 +1,20 @@
-import { loadConfig, updateConfig, listRecentErrors, listRecentLlmRequests, loadTranslationStatsSummary, resetTranslationCache } from './database';
+import {
+	loadConfig,
+	updateConfig,
+	listRecentErrors,
+	listRecentLlmRequests,
+	loadTranslationStatsSummary,
+	resetTranslationCache,
+	getPromotionListUsage,
+	listPromotionItems,
+	createPromotionItem,
+	deletePromotionItem,
+} from './database';
 import { TRANSLATION_PROMPT_VERSION } from './constants';
 import { jsonResponse, clampInteger, countCharacters } from './utils';
 import { requestAiTranslation } from './ai';
 import { executeTranslation } from './translation';
-import { Env } from './types';
+import { Env, PromotionItemType } from './types';
 
 const SESSION_TTL_SECONDS = 60 * 60 * 12;
 const TOKEN_VERSION = 'v1';
@@ -161,6 +172,86 @@ export async function handleManagerApi(request: Request, env: Env, ctx: Executio
 	if (path === '/resetcache' && request.method === 'POST') {
 		ctx.waitUntil(resetTranslationCache(env, 'manager'));
 		return jsonResponse({ status: 'ok', result: 'translation_cache のレコード削除を開始しました。' });
+	}
+
+	if (path === '/promotion/usage' && request.method === 'GET') {
+		return jsonResponse({ status: 'ok', result: await getPromotionListUsage(env) });
+	}
+
+	if (path === '/promotion/items' && request.method === 'GET') {
+		return jsonResponse({ status: 'ok', result: await listPromotionItems(env) });
+	}
+
+	if (path === '/promotion/items' && request.method === 'POST') {
+		const body = await readJsonBody(request);
+		const itemType = String(body?.type ?? '') as PromotionItemType;
+		if (itemType !== 'Avatar' && itemType !== 'World') return jsonResponse({ status: 'error', result: 'type は Avatar または World を指定してください。' }, 400);
+
+		const payload = {
+			ID: String(body?.item?.ID ?? '').trim(),
+			Title: String(body?.item?.Title ?? '').trim(),
+			Anchor: String(body?.item?.Anchor ?? '').trim(),
+			Description: String(body?.item?.Description ?? '').trim(),
+			Link: String(body?.item?.Link ?? '').trim(),
+			Image: String(body?.item?.Image ?? '').trim(),
+		};
+		if (!payload.ID || !payload.Title || !payload.Anchor || !payload.Description || !payload.Link || !payload.Image) {
+			return jsonResponse({ status: 'error', result: '必須項目が不足しています。' }, 400);
+		}
+
+		const predictedBytes = clampInteger(Number(body?.predictedBytes), 0, 200000000, 0);
+		try {
+			const created = await createPromotionItem(env, itemType, payload, predictedBytes);
+			if (!created.ok) return jsonResponse({ status: 'error', result: 'PromotionList payload limit exceeded' }, 400);
+			return jsonResponse({ status: 'ok', result: created.summary });
+		} catch (error) {
+			if (error instanceof Error && error.message === 'promotion_payload_limit_exceeded') {
+				return jsonResponse({ status: 'error', result: 'PromotionList payload limit exceeded' }, 400);
+			}
+			if (error instanceof Error && error.message.includes('UNIQUE')) {
+				return jsonResponse({ status: 'error', result: 'ID が重複しています。' }, 409);
+			}
+			throw error;
+		}
+	}
+
+	if (path === '/promotion/items/delete' && request.method === 'POST') {
+		const body = await readJsonBody(request);
+		const id = String(body?.id ?? '').trim();
+		if (id.length === 0) return jsonResponse({ status: 'error', result: 'id を指定してください。' }, 400);
+		return jsonResponse({ status: 'ok', result: await deletePromotionItem(env, id) });
+	}
+
+	if (path === '/docs/ai' && request.method === 'GET') {
+		return jsonResponse({
+			status: 'ok',
+			result: {
+				title: 'AIサービス API 仕様',
+				body: [
+					'公開翻訳 API: GET /trans?{lang}={text}',
+					'許可ヘッダー: UnityPlayer + Accept */* + X-Unity-Version',
+					'レスポンス形式: { status, result }',
+					'サーバー停止時: 503 + Server is closed',
+				],
+			},
+		});
+	}
+
+	if (path === '/docs/promotion' && request.method === 'GET') {
+		return jsonResponse({
+			status: 'ok',
+			result: {
+				title: 'PromotionList API 仕様',
+				body: [
+					'公開API: GET /PromotionList',
+					'レスポンスは { Avatar: PromotionItem[], World: PromotionItem[] }',
+					'PromotionItem: Title / Anchor / Description / Link / ID / Image',
+					'Image は Base64 文字列',
+					'公開APIは都度集計せず、管理画面更新時に再生成したキャッシュJSONを返す',
+					'JSON 総サイズ上限は 100MB',
+				],
+			},
+		});
 	}
 
 	return jsonResponse({ status: 'error', result: 'Not Found' }, 404);
