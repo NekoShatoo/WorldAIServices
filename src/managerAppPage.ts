@@ -89,7 +89,7 @@ export function buildManagerAppPageHtml() {
         </div>
         <div class="card p-3">
           <h3 class="text-sm font-semibold mb-2">登録済み項目</h3>
-          <div id="promotionItemsList" class="space-y-2 text-sm"></div>
+          <div id="promotionItemsList" class="space-y-2 text-sm max-h-[28rem] overflow-y-auto pr-1"></div>
         </div>
       </section>
 
@@ -105,15 +105,6 @@ export function buildManagerAppPageHtml() {
         <button id="promotionModalCloseButton" class="px-3 py-1 rounded bg-violet-100 text-violet-700 text-sm font-semibold">閉じる</button>
       </div>
       <p id="promotionPredictionText" class="text-xs text-[color:var(--mgr-muted)]">追加予測: 0MB</p>
-      <div class="grid md:grid-cols-2 gap-3 items-end">
-        <label class="text-sm flex items-center gap-2"><input id="promotionCompressEnabled" type="checkbox" checked /><span>画像圧縮を有効化</span></label>
-        <label class="text-sm">MaxSize
-          <select id="promotionCompressMaxSize" class="mt-1 w-full border rounded-xl px-3 py-2 border-[color:var(--mgr-border)] bg-white">
-            <option value="32">32</option><option value="64">64</option><option value="128">128</option><option value="256">256</option><option value="512" selected>512</option><option value="1024">1024</option><option value="2048">2048</option><option value="4096">4096</option><option value="8192">8192</option>
-          </select>
-        </label>
-      </div>
-      <p id="promotionImageSizeWarning" class="text-xs text-yellow-700 hidden">512を超える画像は容量を圧迫する可能性があります。</p>
       <div class="grid md:grid-cols-2 gap-3">
         <label class="text-sm">Type<select id="promotionTypeInput" class="mt-1 w-full border rounded-xl px-3 py-2 border-[color:var(--mgr-border)]"><option value="Avatar">Avatar</option><option value="World">World</option></select></label>
         <label class="text-sm">ID<input id="promotionIdInput" class="mt-1 w-full border rounded-xl px-3 py-2 border-[color:var(--mgr-border)]" /></label>
@@ -121,8 +112,19 @@ export function buildManagerAppPageHtml() {
         <label class="text-sm">Anchor<input id="promotionAnchorInput" class="mt-1 w-full border rounded-xl px-3 py-2 border-[color:var(--mgr-border)]" /></label>
         <label class="text-sm md:col-span-2">Description<textarea id="promotionDescriptionInput" rows="3" class="mt-1 w-full border rounded-xl px-3 py-2 border-[color:var(--mgr-border)]"></textarea></label>
         <label class="text-sm md:col-span-2">Link<input id="promotionLinkInput" class="mt-1 w-full border rounded-xl px-3 py-2 border-[color:var(--mgr-border)]" /></label>
-        <label class="text-sm md:col-span-2">Image (Base64)<textarea id="promotionImageInput" rows="4" class="mt-1 w-full border rounded-xl px-3 py-2 border-[color:var(--mgr-border)]"></textarea></label>
-        <label class="text-sm md:col-span-2">画像アップロード<input id="promotionImageFileInput" type="file" accept="image/*" class="mt-1 w-full border rounded-xl px-3 py-2 border-[color:var(--mgr-border)] bg-white" /></label>
+        <details class="text-sm md:col-span-2"><summary class="cursor-pointer select-none font-semibold text-[color:var(--mgr-muted)]">Image (Base64) [デバッグ用]</summary><textarea id="promotionImageInput" rows="4" class="mt-2 w-full border rounded-xl px-3 py-2 border-[color:var(--mgr-border)]"></textarea></details>
+        <div class="md:col-span-2 grid md:grid-cols-3 gap-3 items-end">
+          <label class="text-sm md:col-span-2">画像アップロード<input id="promotionImageFileInput" type="file" accept="image/*" class="mt-1 w-full border rounded-xl px-3 py-2 border-[color:var(--mgr-border)] bg-white" /></label>
+          <div class="space-y-2">
+            <label class="text-sm flex items-center gap-2"><input id="promotionCompressEnabled" type="checkbox" checked /><span>画像圧縮</span></label>
+            <label class="text-sm">MaxSize
+              <select id="promotionCompressMaxSize" class="mt-1 w-full border rounded-xl px-3 py-2 border-[color:var(--mgr-border)] bg-white">
+                <option value="32">32</option><option value="64">64</option><option value="128">128</option><option value="256">256</option><option value="512" selected>512</option><option value="1024">1024</option><option value="2048">2048</option><option value="4096">4096</option><option value="8192">8192</option>
+              </select>
+            </label>
+          </div>
+        </div>
+        <p id="promotionImageSizeWarning" class="text-xs text-yellow-700 md:col-span-2 hidden">512を超える画像は容量を圧迫する可能性があります。</p>
         <div class="md:col-span-2 space-y-2">
           <p class="text-sm font-semibold">圧縮後プレビュー</p>
           <button id="promotionImagePreviewOpenButton" type="button" class="hidden px-3 py-2 rounded-lg bg-violet-100 text-violet-700 text-sm font-semibold">プレビューを拡大表示</button>

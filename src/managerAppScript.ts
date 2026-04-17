@@ -8,6 +8,7 @@ export const MANAGER_APP_SCRIPT = `
       promotionItems: [],
       promotionModalMode: "create",
       promotionEditingId: "",
+      promotionUploadedImageDataUrl: "",
     };
     if (!state.token) location.href = "/mgr";
 
@@ -165,12 +166,22 @@ export const MANAGER_APP_SCRIPT = `
       ui.promotionImageSizeWarning.classList.toggle("hidden", selectedMax <= 512);
     }
 
-    async function fileToImage(file) {
+    function normalizeImageValueToDataUrl(value) {
+      const normalized = String(value || "").trim();
+      if (!normalized) return "";
+      if (normalized.startsWith("data:image/")) return normalized;
+      return "data:image/*;base64," + normalized;
+    }
+
+    async function fileToDataUrl(file) {
       const buffer = await file.arrayBuffer();
       const bytes = new Uint8Array(buffer);
       let binary = "";
       for (let index = 0; index < bytes.length; index += 1) binary += String.fromCharCode(bytes[index]);
-      const source = "data:image/*;base64," + btoa(binary);
+      return "data:image/*;base64," + btoa(binary);
+    }
+
+    async function dataUrlToImage(source) {
       return await new Promise((resolve, reject) => {
         const image = new Image();
         image.onload = () => resolve(image);
@@ -197,6 +208,21 @@ export const MANAGER_APP_SCRIPT = `
       if (!context) throw new Error("canvas_context_missing");
       context.drawImage(image, 0, 0, targetWidth, targetHeight);
       return canvas.toDataURL("image/png").split(",")[1] || "";
+    }
+
+    async function reapplyImageCompression() {
+      const source = state.promotionUploadedImageDataUrl || normalizeImageValueToDataUrl(ui.promotionImageInput.value);
+      if (!source) return;
+      const maxSize = Number(ui.promotionCompressMaxSize.value || "512");
+      const enableCompress = ui.promotionCompressEnabled.checked;
+      try {
+        const image = await dataUrlToImage(source);
+        ui.promotionImageInput.value = imageToBase64(image, maxSize, enableCompress);
+      } catch (error) {
+        console.error("[mgr] 画像再圧縮に失敗しました", error);
+      }
+      setPromotionImagePreview(ui.promotionImageInput.value);
+      refreshPromotionPrediction();
     }
 
     function renderPromotionUsage() {
@@ -276,6 +302,7 @@ export const MANAGER_APP_SCRIPT = `
       updatePromotionImageSizeWarning();
       setPromotionImagePreview("");
       state.promotionEditingId = "";
+      state.promotionUploadedImageDataUrl = "";
     }
 
     function openPromotionModal(mode, item) {
@@ -297,6 +324,7 @@ export const MANAGER_APP_SCRIPT = `
         ui.promotionLinkInput.value = item.Link;
         ui.promotionImageInput.value = item.Image;
         setPromotionImagePreview(item.Image);
+        state.promotionUploadedImageDataUrl = "";
       }
       ui.promotionModal.classList.remove("hidden");
       refreshPromotionPrediction();
@@ -385,22 +413,24 @@ export const MANAGER_APP_SCRIPT = `
     ui.promotionImagePreviewOpenButton.addEventListener("click", () => ui.promotionImagePreviewModal.classList.remove("hidden"));
     ui.promotionImagePreviewCloseButton.addEventListener("click", () => ui.promotionImagePreviewModal.classList.add("hidden"));
     ui.promotionImagePreviewModal.addEventListener("click", (event) => { if (event.target === ui.promotionImagePreviewModal) ui.promotionImagePreviewModal.classList.add("hidden"); });
-    ui.promotionCompressEnabled.addEventListener("change", updatePromotionImageSizeWarning);
-    ui.promotionCompressMaxSize.addEventListener("change", updatePromotionImageSizeWarning);
+    ui.promotionCompressEnabled.addEventListener("change", () => {
+      updatePromotionImageSizeWarning();
+      reapplyImageCompression();
+    });
+    ui.promotionCompressMaxSize.addEventListener("change", () => {
+      updatePromotionImageSizeWarning();
+      reapplyImageCompression();
+    });
 
     ui.promotionImageFileInput.addEventListener("change", async () => {
       const file = ui.promotionImageFileInput.files && ui.promotionImageFileInput.files[0];
       if (!file) return;
-      const maxSize = Number(ui.promotionCompressMaxSize.value || "512");
-      const enableCompress = ui.promotionCompressEnabled.checked;
       try {
-        const image = await fileToImage(file);
-        ui.promotionImageInput.value = imageToBase64(image, maxSize, enableCompress);
+        state.promotionUploadedImageDataUrl = await fileToDataUrl(file);
       } catch (error) {
-        console.error("[mgr] 画像処理に失敗しました", error);
+        console.error("[mgr] 画像読込に失敗しました", error);
       }
-      setPromotionImagePreview(ui.promotionImageInput.value);
-      refreshPromotionPrediction();
+      await reapplyImageCompression();
     });
     [ui.promotionTypeInput, ui.promotionTitleInput, ui.promotionAnchorInput, ui.promotionDescriptionInput, ui.promotionLinkInput, ui.promotionImageInput].forEach((input) => input.addEventListener("input", () => {
       if (input === ui.promotionImageInput) setPromotionImagePreview(ui.promotionImageInput.value);

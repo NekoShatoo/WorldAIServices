@@ -133,3 +133,7 @@ PromotionList 仕様
 - Cloudflare D1 の Worker API は `prepare().bind().first()` / `run()` / `batch()` を利用する
 - D1 の 1 invocation あたり query 上限はプラン依存で Free 50 / Paid 1000
 - `wrangler.jsonc` の D1 binding は `d1_databases` と `migrations_dir` を利用する
+
+- PromotionList の登録済み一覧は縦スクロール表示にし、項目数が多くても管理画面で操作できるようにした
+- Image(Base64) 入力欄はデバッグ用途としてデフォルトで折りたたみ表示にした
+- MaxSize と圧縮ON/OFF は画像アップロード欄の横に配置し、画像選択後に設定変更すると即座に再圧縮されるようにした
