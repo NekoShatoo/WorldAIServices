@@ -494,6 +494,35 @@ export async function deletePromotionItem(env: Env, id: string) {
 	return await rebuildPromotionListCache(env);
 }
 
+export async function updatePromotionItem(
+	env: Env,
+	id: string,
+	itemType: PromotionItemType,
+	payload: PromotionItem,
+	predictedPayloadBytes: number
+) {
+	const current = await loadPromotionPayloadBytes(env);
+	const expected = current + Math.max(0, Math.floor(predictedPayloadBytes));
+	if (expected > PROMOTION_LIST_MAX_BYTES) return { ok: false as const, reason: 'payload_limit_exceeded', expectedBytes: expected };
+
+	await env.STATE_DB.prepare(
+		`UPDATE promotion_list_items
+    SET item_type = ?,
+        title = ?,
+        anchor = ?,
+        description = ?,
+        link = ?,
+        image = ?,
+        updated_at = ?
+    WHERE id = ?`
+	)
+		.bind(itemType, payload.Title, payload.Anchor, payload.Description, payload.Link, payload.Image, new Date().toISOString(), id)
+		.run();
+
+	const summary = await rebuildPromotionListCache(env);
+	return { ok: true as const, summary };
+}
+
 export async function getPromotionListPayload(env: Env): Promise<PromotionPayload> {
 	const payloadText = await loadPromotionPayloadText(env);
 	try {

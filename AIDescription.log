@@ -46,6 +46,7 @@
   - PromotionList 使用率取得 `/mgr/api/promotion/usage`
   - PromotionList 一覧取得 `/mgr/api/promotion/items`
   - PromotionList 追加 `/mgr/api/promotion/items`
+  - PromotionList 更新 `/mgr/api/promotion/items/update`
   - PromotionList 削除 `/mgr/api/promotion/items/delete`
   - サービス説明取得 `/mgr/api/docs/ai` / `/mgr/api/docs/promotion`
 
@@ -63,6 +64,8 @@ PromotionList 仕様
   - `Image`（Base64）
 - 公開APIのレスポンスは毎回 DB 集計せず、管理画面更新時に再生成したキャッシュ JSON を返す
 - 管理画面で画像ファイルを選択すると、フロントで Base64 化して `Image` に設定する
+- 管理画面の PromotionList は常時入力フォームを表示せず、追加/編集時のみモーダルでフォームを開く
+- PromotionList 項目管理は CRUD（一覧/追加/編集/削除）を提供する
 - JSON 全体サイズ上限は 100MB
 - 追加時はフロントで増分サイズを予測し、100MB 超過見込みなら送信前に拒否する
 - バックエンドでも上限を二重チェックし、超過時は登録を拒否する

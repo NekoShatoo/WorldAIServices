@@ -9,6 +9,7 @@ import {
 	listPromotionItems,
 	createPromotionItem,
 	deletePromotionItem,
+	updatePromotionItem,
 } from './database';
 import { TRANSLATION_PROMPT_VERSION } from './constants';
 import { jsonResponse, clampInteger, countCharacters } from './utils';
@@ -220,6 +221,39 @@ export async function handleManagerApi(request: Request, env: Env, ctx: Executio
 		const id = String(body?.id ?? '').trim();
 		if (id.length === 0) return jsonResponse({ status: 'error', result: 'id を指定してください。' }, 400);
 		return jsonResponse({ status: 'ok', result: await deletePromotionItem(env, id) });
+	}
+
+	if (path === '/promotion/items/update' && request.method === 'POST') {
+		const body = await readJsonBody(request);
+		const id = String(body?.id ?? '').trim();
+		if (id.length === 0) return jsonResponse({ status: 'error', result: 'id を指定してください。' }, 400);
+
+		const itemType = String(body?.type ?? '') as PromotionItemType;
+		if (itemType !== 'Avatar' && itemType !== 'World') return jsonResponse({ status: 'error', result: 'type は Avatar または World を指定してください。' }, 400);
+
+		const payload = {
+			ID: id,
+			Title: String(body?.item?.Title ?? '').trim(),
+			Anchor: String(body?.item?.Anchor ?? '').trim(),
+			Description: String(body?.item?.Description ?? '').trim(),
+			Link: String(body?.item?.Link ?? '').trim(),
+			Image: String(body?.item?.Image ?? '').trim(),
+		};
+		if (!payload.Title || !payload.Anchor || !payload.Description || !payload.Link || !payload.Image) {
+			return jsonResponse({ status: 'error', result: '必須項目が不足しています。' }, 400);
+		}
+
+		const predictedBytes = clampInteger(Number(body?.predictedBytes), 0, 200000000, 0);
+		try {
+			const updated = await updatePromotionItem(env, id, itemType, payload, predictedBytes);
+			if (!updated.ok) return jsonResponse({ status: 'error', result: 'PromotionList payload limit exceeded' }, 400);
+			return jsonResponse({ status: 'ok', result: updated.summary });
+		} catch (error) {
+			if (error instanceof Error && error.message === 'promotion_payload_limit_exceeded') {
+				return jsonResponse({ status: 'error', result: 'PromotionList payload limit exceeded' }, 400);
+			}
+			throw error;
+		}
 	}
 
 	if (path === '/docs/ai' && request.method === 'GET') {
