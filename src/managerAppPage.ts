@@ -135,6 +135,14 @@ export function buildManagerAppPageHtml() {
         </div>
       </div>
       <div class="flex justify-end gap-2">
+        <div id="promotionSubmitProgressBox" class="hidden flex-1 max-w-xs self-center">
+          <div class="w-full space-y-1">
+            <p id="promotionSubmitProgressText" class="text-xs text-[color:var(--mgr-muted)]">送信準備中...</p>
+            <div class="w-full h-2 bg-violet-100 rounded-full overflow-hidden">
+              <div id="promotionSubmitProgressBar" class="h-full bg-violet-500 transition-all duration-200" style="width: 0%"></div>
+            </div>
+          </div>
+        </div>
         <button id="promotionModalCancelButton" class="px-4 py-2 rounded-xl bg-violet-100 text-violet-700 font-semibold">キャンセル</button>
         <button id="promotionModalSubmitButton" class="px-4 py-2 rounded-xl bg-violet-600 text-white font-semibold hover:bg-violet-500">保存</button>
       </div>

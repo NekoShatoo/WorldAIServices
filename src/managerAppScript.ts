@@ -57,6 +57,9 @@ export const MANAGER_APP_SCRIPT = `
       promotionModalCloseButton: document.getElementById("promotionModalCloseButton"),
       promotionModalCancelButton: document.getElementById("promotionModalCancelButton"),
       promotionModalSubmitButton: document.getElementById("promotionModalSubmitButton"),
+      promotionSubmitProgressBox: document.getElementById("promotionSubmitProgressBox"),
+      promotionSubmitProgressText: document.getElementById("promotionSubmitProgressText"),
+      promotionSubmitProgressBar: document.getElementById("promotionSubmitProgressBar"),
       promotionPredictionText: document.getElementById("promotionPredictionText"),
       promotionCompressEnabled: document.getElementById("promotionCompressEnabled"),
       promotionCompressMaxSize: document.getElementById("promotionCompressMaxSize"),
@@ -266,6 +269,31 @@ export const MANAGER_APP_SCRIPT = `
       ui.kpiPromotionUsage.textContent = state.promotionUsage.usedPercent.toFixed(2) + "%";
     }
 
+    function setPromotionSubmitProgress(percent, text) {
+      const normalized = Math.max(0, Math.min(100, Number(percent) || 0));
+      ui.promotionSubmitProgressBox.classList.remove("hidden");
+      ui.promotionSubmitProgressBar.style.width = normalized + "%";
+      ui.promotionSubmitProgressText.textContent = text;
+    }
+
+    function beginPromotionSubmitProgress() {
+      ui.promotionModalSubmitButton.disabled = true;
+      ui.promotionModalCancelButton.disabled = true;
+      ui.promotionModalCloseButton.disabled = true;
+      ui.promotionModalSubmitButton.classList.add("opacity-70", "cursor-not-allowed");
+      setPromotionSubmitProgress(8, "送信を開始しています...");
+    }
+
+    function endPromotionSubmitProgress() {
+      ui.promotionModalSubmitButton.disabled = false;
+      ui.promotionModalCancelButton.disabled = false;
+      ui.promotionModalCloseButton.disabled = false;
+      ui.promotionModalSubmitButton.classList.remove("opacity-70", "cursor-not-allowed");
+      ui.promotionSubmitProgressBar.style.width = "0%";
+      ui.promotionSubmitProgressText.textContent = "送信準備中...";
+      ui.promotionSubmitProgressBox.classList.add("hidden");
+    }
+
     function renderPromotionItems() {
       if (!state.promotionItems.length) {
         ui.promotionItemsList.innerHTML = '<p class="text-sm text-[color:var(--mgr-muted)]">登録項目はありません。</p>';
@@ -336,6 +364,7 @@ export const MANAGER_APP_SCRIPT = `
       ui.promotionCompressMaxSize.value = "512";
       updatePromotionImageSizeWarning();
       setPromotionImagePreview("");
+      endPromotionSubmitProgress();
       state.promotionEditingId = "";
       state.promotionUploadedImageDataUrl = "";
     }
@@ -377,21 +406,28 @@ export const MANAGER_APP_SCRIPT = `
         alert("予測サイズが 100MB を超えるため保存できません。");
         return;
       }
+      beginPromotionSubmitProgress();
       if (state.promotionModalMode === "create") {
+        setPromotionSubmitProgress(35, "追加データを送信しています...");
         const result = (await callApi("/promotion/items", { method: "POST", body: JSON.stringify({ type: payload.type, item: payload.item, predictedBytes: prediction.predicted }) })).data;
         if (result.status !== "ok") {
+          endPromotionSubmitProgress();
           alert("追加に失敗しました。");
           return;
         }
       } else {
+        setPromotionSubmitProgress(35, "更新データを送信しています...");
         const result = (await callApi("/promotion/items/update", { method: "POST", body: JSON.stringify({ id: state.promotionEditingId, type: payload.type, item: payload.item, predictedBytes: prediction.predicted }) })).data;
         if (result.status !== "ok") {
+          endPromotionSubmitProgress();
           alert("更新に失敗しました。");
           return;
         }
       }
-      closePromotionModal();
+      setPromotionSubmitProgress(75, "一覧を更新しています...");
       await loadPromotionData();
+      setPromotionSubmitProgress(100, "完了しました。");
+      closePromotionModal();
     }
 
     async function loadDocs() {
