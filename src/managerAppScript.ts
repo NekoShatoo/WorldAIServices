@@ -69,7 +69,9 @@ export const MANAGER_APP_SCRIPT = `
       promotionLinkInput: document.getElementById("promotionLinkInput"),
       promotionImageInput: document.getElementById("promotionImageInput"),
       promotionImageFileInput: document.getElementById("promotionImageFileInput"),
+      promotionImagePreviewContainer: document.getElementById("promotionImagePreviewContainer"),
       promotionImagePreview: document.getElementById("promotionImagePreview"),
+      promotionImageMagnifierLens: document.getElementById("promotionImageMagnifierLens"),
       promotionImagePreviewOpenButton: document.getElementById("promotionImagePreviewOpenButton"),
       promotionImagePreviewModal: document.getElementById("promotionImagePreviewModal"),
       promotionImagePreviewLarge: document.getElementById("promotionImagePreviewLarge"),
@@ -148,17 +150,50 @@ export const MANAGER_APP_SCRIPT = `
     function setPromotionImagePreview(base64Text) {
       const normalized = String(base64Text || "").trim();
       if (!normalized) {
-        ui.promotionImagePreview.classList.add("hidden");
+        ui.promotionImagePreviewContainer.classList.add("hidden");
         ui.promotionImagePreviewOpenButton.classList.add("hidden");
         ui.promotionImagePreview.removeAttribute("src");
         ui.promotionImagePreviewLarge.removeAttribute("src");
+        hidePromotionMagnifier();
         return;
       }
       const source = "data:image/*;base64," + normalized;
       ui.promotionImagePreview.src = source;
       ui.promotionImagePreviewLarge.src = source;
-      ui.promotionImagePreview.classList.remove("hidden");
+      ui.promotionImagePreviewContainer.classList.remove("hidden");
       ui.promotionImagePreviewOpenButton.classList.remove("hidden");
+      hidePromotionMagnifier();
+    }
+
+    function hidePromotionMagnifier() {
+      ui.promotionImageMagnifierLens.classList.add("hidden");
+    }
+
+    function handlePromotionMagnifierMove(event) {
+      if (!ui.promotionImagePreview.getAttribute("src")) return;
+      const rect = ui.promotionImagePreview.getBoundingClientRect();
+      if (rect.width <= 0 || rect.height <= 0) return;
+
+      const x = event.clientX - rect.left;
+      const y = event.clientY - rect.top;
+      if (x < 0 || y < 0 || x > rect.width || y > rect.height) {
+        hidePromotionMagnifier();
+        return;
+      }
+
+      const lens = ui.promotionImageMagnifierLens;
+      const lensSize = 112;
+      const zoom = 2.5;
+      const half = lensSize / 2;
+      const boundedLeft = Math.max(0, Math.min(rect.width - lensSize, x - half));
+      const boundedTop = Math.max(0, Math.min(rect.height - lensSize, y - half));
+      lens.style.left = boundedLeft + "px";
+      lens.style.top = boundedTop + "px";
+      lens.style.backgroundImage = "url('" + ui.promotionImagePreview.src + "')";
+      lens.style.backgroundSize = (rect.width * zoom) + "px " + (rect.height * zoom) + "px";
+      lens.style.backgroundPosition = (-(x * zoom - half)) + "px " + (-(y * zoom - half)) + "px";
+      lens.style.backgroundColor = "#ffffffdd";
+      lens.classList.remove("hidden");
     }
 
     function updatePromotionImageSizeWarning() {
@@ -413,6 +448,8 @@ export const MANAGER_APP_SCRIPT = `
     ui.promotionImagePreviewOpenButton.addEventListener("click", () => ui.promotionImagePreviewModal.classList.remove("hidden"));
     ui.promotionImagePreviewCloseButton.addEventListener("click", () => ui.promotionImagePreviewModal.classList.add("hidden"));
     ui.promotionImagePreviewModal.addEventListener("click", (event) => { if (event.target === ui.promotionImagePreviewModal) ui.promotionImagePreviewModal.classList.add("hidden"); });
+    ui.promotionImagePreviewContainer.addEventListener("mousemove", handlePromotionMagnifierMove);
+    ui.promotionImagePreviewContainer.addEventListener("mouseleave", hidePromotionMagnifier);
     ui.promotionCompressEnabled.addEventListener("change", () => {
       updatePromotionImageSizeWarning();
       reapplyImageCompression();

@@ -128,7 +128,10 @@ export function buildManagerAppPageHtml() {
         <div class="md:col-span-2 space-y-2">
           <p class="text-sm font-semibold">圧縮後プレビュー</p>
           <button id="promotionImagePreviewOpenButton" type="button" class="hidden px-3 py-2 rounded-lg bg-violet-100 text-violet-700 text-sm font-semibold">プレビューを拡大表示</button>
-          <img id="promotionImagePreview" class="hidden max-h-40 rounded-xl border border-[color:var(--mgr-border)] object-contain bg-white" alt="promotion-preview" />
+          <div id="promotionImagePreviewContainer" class="hidden relative inline-block">
+            <img id="promotionImagePreview" class="max-h-40 rounded-xl border border-[color:var(--mgr-border)] object-contain bg-white" alt="promotion-preview" />
+            <div id="promotionImageMagnifierLens" class="hidden absolute w-28 h-28 rounded-full border-2 border-violet-400 shadow-lg pointer-events-none bg-no-repeat"></div>
+          </div>
         </div>
       </div>
       <div class="flex justify-end gap-2">
