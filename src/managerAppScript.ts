@@ -13,6 +13,7 @@ export const MANAGER_APP_SCRIPT = `
       promotionSortDraftIds: [],
       promotionDragAutoScrollRaf: 0,
       promotionDragAutoScrollSpeed: 0,
+      promotionThumbRenderToken: 0,
     };
     if (!state.token) location.href = "/mgr";
 
@@ -326,8 +327,13 @@ export const MANAGER_APP_SCRIPT = `
         const previewUi = imageDataUrl
           ? '<button class="px-2 py-1 rounded bg-violet-100 text-violet-700 text-xs" data-promotion-preview="' + item.ID + '">画像</button>'
           : '';
-        return '<div class="card p-3" ' + dragAttrs + '><div class="flex items-center justify-between gap-2"><div class="flex items-center gap-2">' + moveUi + '<div><p class="font-semibold">' + item.Type + ' / ' + (item.Title || "(no title)") + '</p><p class="text-xs text-[color:var(--mgr-muted)]">ID: ' + item.ID + '</p></div></div><div class="flex gap-2">' + previewUi + '<button class="px-2 py-1 rounded bg-violet-100 text-violet-700 text-xs" data-promotion-edit="' + item.ID + '">編集</button><button class="px-2 py-1 rounded bg-red-100 text-red-700 text-xs" data-promotion-delete="' + item.ID + '">削除</button></div></div><p class="text-xs mt-2 text-[color:var(--mgr-muted)]">' + (item.Description || "(no description)") + '</p></div>';
+        const thumbUi = imageDataUrl
+          ? '<div class="relative w-14 h-14 rounded-lg border border-[color:var(--mgr-border)] overflow-hidden bg-violet-50 flex-shrink-0" data-thumb-id="' + encodeURIComponent(item.ID) + '"><div class="absolute inset-0 flex items-center justify-center" data-thumb-spinner><span class="inline-block w-5 h-5 border-2 border-violet-300 border-t-violet-600 rounded-full animate-spin"></span></div><img class="hidden w-full h-full object-cover" data-thumb-img alt="thumb" /></div>'
+          : '<div class="w-14 h-14 rounded-lg border border-[color:var(--mgr-border)] bg-violet-50 text-[10px] text-[color:var(--mgr-muted)] flex items-center justify-center flex-shrink-0">NoImg</div>';
+        return '<div class="card p-3" ' + dragAttrs + '><div class="flex items-center justify-between gap-2"><div class="flex items-center gap-2">' + moveUi + thumbUi + '<div><p class="font-semibold">' + item.Type + ' / ' + (item.Title || "(no title)") + '</p><p class="text-xs text-[color:var(--mgr-muted)]">ID: ' + item.ID + '</p></div></div><div class="flex gap-2">' + previewUi + '<button class="px-2 py-1 rounded bg-violet-100 text-violet-700 text-xs" data-promotion-edit="' + item.ID + '">編集</button><button class="px-2 py-1 rounded bg-red-100 text-red-700 text-xs" data-promotion-delete="' + item.ID + '">削除</button></div></div><p class="text-xs mt-2 text-[color:var(--mgr-muted)]">' + (item.Description || "(no description)") + '</p></div>';
       }).join("");
+      state.promotionThumbRenderToken += 1;
+      hydratePromotionListThumbnails(sourceItems, state.promotionThumbRenderToken);
       Array.from(ui.promotionItemsList.querySelectorAll("[data-promotion-delete]")).forEach((button) => {
         button.addEventListener("click", async () => {
           const id = button.getAttribute("data-promotion-delete");
@@ -357,6 +363,45 @@ export const MANAGER_APP_SCRIPT = `
         });
       });
       if (state.promotionSortEditMode) bindPromotionSortDragEvents();
+    }
+
+    function waitImageReady(image) {
+      if (image.decode) return image.decode().catch(() => null);
+      return new Promise((resolve) => {
+        if (image.complete) {
+          resolve(null);
+          return;
+        }
+        image.onload = () => resolve(null);
+        image.onerror = () => resolve(null);
+      });
+    }
+
+    async function hydratePromotionListThumbnails(items, renderToken) {
+      const imageMap = {};
+      items.forEach((item) => {
+        const source = getPromotionItemDataUrl(item);
+        if (source) imageMap[item.ID] = source;
+      });
+      const hosts = Array.from(ui.promotionItemsList.querySelectorAll("[data-thumb-id]"));
+      for (const host of hosts) {
+        if (renderToken !== state.promotionThumbRenderToken) return;
+        const encodedId = String(host.getAttribute("data-thumb-id") || "");
+        const id = decodeURIComponent(encodedId);
+        const source = imageMap[id];
+        if (!source) continue;
+        const spinner = host.querySelector("[data-thumb-spinner]");
+        const target = host.querySelector("[data-thumb-img]");
+        const loader = new Image();
+        loader.decoding = "async";
+        loader.src = source;
+        await waitImageReady(loader);
+        if (renderToken !== state.promotionThumbRenderToken) return;
+        target.src = source;
+        target.classList.remove("hidden");
+        if (spinner) spinner.classList.add("hidden");
+        await new Promise((resolve) => setTimeout(resolve, 24));
+      }
     }
 
     function bindPromotionSortDragEvents() {
