@@ -9,6 +9,8 @@ export const MANAGER_APP_SCRIPT = `
       promotionModalMode: "create",
       promotionEditingId: "",
       promotionUploadedImageDataUrl: "",
+      promotionSortEditMode: false,
+      promotionSortDraftIds: [],
     };
     if (!state.token) location.href = "/mgr";
 
@@ -50,6 +52,10 @@ export const MANAGER_APP_SCRIPT = `
       promotionCreateOpenButton: document.getElementById("promotionCreateOpenButton"),
       promotionReloadButton: document.getElementById("promotionReloadButton"),
       promotionFilterType: document.getElementById("promotionFilterType"),
+      promotionSortEditButton: document.getElementById("promotionSortEditButton"),
+      promotionSortSaveButton: document.getElementById("promotionSortSaveButton"),
+      promotionSortCancelButton: document.getElementById("promotionSortCancelButton"),
+      promotionSortHint: document.getElementById("promotionSortHint"),
       docsAiBody: document.getElementById("docsAiBody"),
       docsPromotionBody: document.getElementById("docsPromotionBody"),
       promotionModal: document.getElementById("promotionModal"),
@@ -80,6 +86,13 @@ export const MANAGER_APP_SCRIPT = `
       promotionImagePreviewLarge: document.getElementById("promotionImagePreviewLarge"),
       promotionImagePreviewCloseButton: document.getElementById("promotionImagePreviewCloseButton"),
     };
+
+    function getPromotionItemDataUrl(item) {
+      const raw = String(item && item.Image ? item.Image : "").trim();
+      if (!raw) return "";
+      if (raw.startsWith("data:image/")) return raw;
+      return "data:image/*;base64," + raw;
+    }
 
     function switchPanel(panelKey) {
       for (const [key, panel] of Object.entries(ui.panels)) panel.classList.toggle("hidden", key !== panelKey);
@@ -299,8 +312,19 @@ export const MANAGER_APP_SCRIPT = `
         ui.promotionItemsList.innerHTML = '<p class="text-sm text-[color:var(--mgr-muted)]">登録項目はありません。</p>';
         return;
       }
-      ui.promotionItemsList.innerHTML = state.promotionItems.map((item) => {
-        return '<div class="card p-3"><div class="flex items-center justify-between gap-2"><div><p class="font-semibold">' + item.Type + ' / ' + (item.Title || "(no title)") + '</p><p class="text-xs text-[color:var(--mgr-muted)]">ID: ' + item.ID + '</p></div><div class="flex gap-2"><button class="px-2 py-1 rounded bg-violet-100 text-violet-700 text-xs" data-promotion-up="' + item.ID + '">↑</button><button class="px-2 py-1 rounded bg-violet-100 text-violet-700 text-xs" data-promotion-down="' + item.ID + '">↓</button><button class="px-2 py-1 rounded bg-violet-100 text-violet-700 text-xs" data-promotion-edit="' + item.ID + '">編集</button><button class="px-2 py-1 rounded bg-red-100 text-red-700 text-xs" data-promotion-delete="' + item.ID + '">削除</button></div></div><p class="text-xs mt-2 text-[color:var(--mgr-muted)]">' + (item.Description || "(no description)") + '</p></div>';
+      const sourceItems = state.promotionSortEditMode
+        ? state.promotionSortDraftIds.map((id) => state.promotionItems.find((item) => item.ID === id)).filter(Boolean)
+        : state.promotionItems;
+      ui.promotionItemsList.innerHTML = sourceItems.map((item) => {
+        const imageDataUrl = getPromotionItemDataUrl(item);
+        const dragAttrs = state.promotionSortEditMode ? ' draggable="true" data-promotion-drag-id="' + item.ID + '"' : '';
+        const moveUi = state.promotionSortEditMode
+          ? '<span class="text-xs px-2 py-1 rounded bg-violet-100 text-violet-700 cursor-grab">ドラッグ</span>'
+          : '';
+        const previewUi = imageDataUrl
+          ? '<button class="px-2 py-1 rounded bg-violet-100 text-violet-700 text-xs" data-promotion-preview="' + item.ID + '">画像</button>'
+          : '';
+        return '<div class="card p-3" ' + dragAttrs + '><div class="flex items-center justify-between gap-2"><div class="flex items-center gap-2">' + moveUi + '<div><p class="font-semibold">' + item.Type + ' / ' + (item.Title || "(no title)") + '</p><p class="text-xs text-[color:var(--mgr-muted)]">ID: ' + item.ID + '</p></div></div><div class="flex gap-2">' + previewUi + '<button class="px-2 py-1 rounded bg-violet-100 text-violet-700 text-xs" data-promotion-edit="' + item.ID + '">編集</button><button class="px-2 py-1 rounded bg-red-100 text-red-700 text-xs" data-promotion-delete="' + item.ID + '">削除</button></div></div><p class="text-xs mt-2 text-[color:var(--mgr-muted)]">' + (item.Description || "(no description)") + '</p></div>';
       }).join("");
       Array.from(ui.promotionItemsList.querySelectorAll("[data-promotion-delete]")).forEach((button) => {
         button.addEventListener("click", async () => {
@@ -308,6 +332,17 @@ export const MANAGER_APP_SCRIPT = `
           if (!id || !confirm("ID " + id + " を削除しますか？")) return;
           await callApi("/promotion/items/delete", { method: "POST", body: JSON.stringify({ id }) });
           await loadPromotionData();
+        });
+      });
+      Array.from(ui.promotionItemsList.querySelectorAll("[data-promotion-preview]")).forEach((button) => {
+        button.addEventListener("click", () => {
+          const id = button.getAttribute("data-promotion-preview");
+          const item = state.promotionItems.find((entry) => entry.ID === id);
+          if (!item) return;
+          const source = getPromotionItemDataUrl(item);
+          if (!source) return;
+          ui.promotionImagePreviewLarge.src = source;
+          ui.promotionImagePreviewModal.classList.remove("hidden");
         });
       });
       Array.from(ui.promotionItemsList.querySelectorAll("[data-promotion-edit]")).forEach((button) => {
@@ -319,22 +354,43 @@ export const MANAGER_APP_SCRIPT = `
           openPromotionModal("edit", item);
         });
       });
-      Array.from(ui.promotionItemsList.querySelectorAll("[data-promotion-up]")).forEach((button) => {
-        button.addEventListener("click", async () => {
-          const id = button.getAttribute("data-promotion-up");
-          if (!id) return;
-          await callApi("/promotion/items/move", { method: "POST", body: JSON.stringify({ id, direction: "up" }) });
-          await loadPromotionData();
+      if (state.promotionSortEditMode) bindPromotionSortDragEvents();
+    }
+
+    function bindPromotionSortDragEvents() {
+      let draggingId = "";
+      Array.from(ui.promotionItemsList.querySelectorAll("[data-promotion-drag-id]")).forEach((element) => {
+        element.addEventListener("dragstart", () => {
+          draggingId = String(element.getAttribute("data-promotion-drag-id") || "");
+          element.classList.add("opacity-60");
+        });
+        element.addEventListener("dragend", () => {
+          element.classList.remove("opacity-60");
+          draggingId = "";
+        });
+        element.addEventListener("dragover", (event) => event.preventDefault());
+        element.addEventListener("drop", (event) => {
+          event.preventDefault();
+          const targetId = String(element.getAttribute("data-promotion-drag-id") || "");
+          if (!draggingId || !targetId || draggingId === targetId) return;
+          const ids = state.promotionSortDraftIds.slice();
+          const from = ids.indexOf(draggingId);
+          const to = ids.indexOf(targetId);
+          if (from < 0 || to < 0) return;
+          ids.splice(from, 1);
+          ids.splice(to, 0, draggingId);
+          state.promotionSortDraftIds = ids;
+          renderPromotionItems();
         });
       });
-      Array.from(ui.promotionItemsList.querySelectorAll("[data-promotion-down]")).forEach((button) => {
-        button.addEventListener("click", async () => {
-          const id = button.getAttribute("data-promotion-down");
-          if (!id) return;
-          await callApi("/promotion/items/move", { method: "POST", body: JSON.stringify({ id, direction: "down" }) });
-          await loadPromotionData();
-        });
-      });
+    }
+
+    function syncPromotionSortEditUi() {
+      ui.promotionSortEditButton.classList.toggle("hidden", state.promotionSortEditMode);
+      ui.promotionSortSaveButton.classList.toggle("hidden", !state.promotionSortEditMode);
+      ui.promotionSortCancelButton.classList.toggle("hidden", !state.promotionSortEditMode);
+      ui.promotionSortHint.classList.toggle("hidden", !state.promotionSortEditMode);
+      ui.promotionFilterType.disabled = state.promotionSortEditMode;
     }
 
     async function loadPromotionData() {
@@ -347,6 +403,7 @@ export const MANAGER_APP_SCRIPT = `
       const itemsResult = (await callApi("/promotion/items?type=" + encodeURIComponent(selectedType))).data;
       if (itemsResult.status === "ok") {
         state.promotionItems = itemsResult.result;
+        if (!state.promotionSortEditMode) state.promotionSortDraftIds = state.promotionItems.map((item) => item.ID);
         renderPromotionItems();
       }
     }
@@ -474,9 +531,36 @@ export const MANAGER_APP_SCRIPT = `
     ui.simulateButton.addEventListener("click", async () => callApi("/simulate", { method: "POST", body: JSON.stringify({ lang: ui.simulateLangInput.value, text: ui.simulateTextInput.value }) }));
 
     ui.promotionCreateOpenButton.addEventListener("click", () => openPromotionModal("create"));
+    ui.promotionSortEditButton.addEventListener("click", () => {
+      state.promotionSortEditMode = true;
+      state.promotionSortDraftIds = state.promotionItems.map((item) => item.ID);
+      syncPromotionSortEditUi();
+      renderPromotionItems();
+    });
+    ui.promotionSortCancelButton.addEventListener("click", () => {
+      state.promotionSortEditMode = false;
+      state.promotionSortDraftIds = state.promotionItems.map((item) => item.ID);
+      syncPromotionSortEditUi();
+      renderPromotionItems();
+    });
+    ui.promotionSortSaveButton.addEventListener("click", async () => {
+      const payload = { type: ui.promotionFilterType.value, orderedIds: state.promotionSortDraftIds };
+      const result = (await callApi("/promotion/items/reorder", { method: "POST", body: JSON.stringify(payload) })).data;
+      if (result.status !== "ok") {
+        alert("並び順の保存に失敗しました。");
+        return;
+      }
+      state.promotionSortEditMode = false;
+      syncPromotionSortEditUi();
+      await loadPromotionData();
+    });
     ui.promotionReloadButton.addEventListener("click", loadPromotionData);
     ui.refreshPromotionUsageButton.addEventListener("click", loadPromotionData);
-    ui.promotionFilterType.addEventListener("change", loadPromotionData);
+    ui.promotionFilterType.addEventListener("change", () => {
+      state.promotionSortEditMode = false;
+      syncPromotionSortEditUi();
+      loadPromotionData();
+    });
     ui.promotionModalCloseButton.addEventListener("click", closePromotionModal);
     ui.promotionModalCancelButton.addEventListener("click", closePromotionModal);
     ui.promotionModalSubmitButton.addEventListener("click", submitPromotionModal);
@@ -511,6 +595,7 @@ export const MANAGER_APP_SCRIPT = `
     }));
     ui.promotionIdInput.addEventListener("input", refreshPromotionPrediction);
     updatePromotionImageSizeWarning();
+    syncPromotionSortEditUi();
 
     switchPanel("dashboard");
     loadDashboard();

@@ -11,6 +11,7 @@ import {
 	deletePromotionItem,
 	updatePromotionItem,
 	movePromotionItem,
+	reorderPromotionItems,
 } from './database';
 import { TRANSLATION_PROMPT_VERSION } from './constants';
 import { jsonResponse, clampInteger, countCharacters } from './utils';
@@ -264,6 +265,16 @@ export async function handleManagerApi(request: Request, env: Env, ctx: Executio
 		const moved = await movePromotionItem(env, id, direction);
 		if (!moved.ok) return jsonResponse({ status: 'error', result: 'not_found' }, 404);
 		return jsonResponse({ status: 'ok', result: moved.summary });
+	}
+
+	if (path === '/promotion/items/reorder' && request.method === 'POST') {
+		const body = await readJsonBody(request);
+		const itemType = String(body?.type ?? '') as PromotionItemType;
+		const orderedIds = Array.isArray(body?.orderedIds) ? body.orderedIds : [];
+		if (itemType !== 'Avatar' && itemType !== 'World') return jsonResponse({ status: 'error', result: 'type は Avatar または World を指定してください。' }, 400);
+		const reordered = await reorderPromotionItems(env, itemType, orderedIds);
+		if (!reordered.ok) return jsonResponse({ status: 'error', result: '並び順データが不正です。' }, 400);
+		return jsonResponse({ status: 'ok', result: reordered.summary });
 	}
 
 	if (path === '/docs/ai' && request.method === 'GET') {

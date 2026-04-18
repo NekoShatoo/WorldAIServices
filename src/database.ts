@@ -585,6 +585,34 @@ export async function movePromotionItem(env: Env, id: string, direction: 'up' | 
 	return { ok: true as const, summary: await rebuildPromotionListCache(env) };
 }
 
+export async function reorderPromotionItems(env: Env, itemType: PromotionItemType, orderedIds: string[]) {
+	const normalizedIds = orderedIds.map((id) => String(id ?? '').trim()).filter((id) => id.length > 0);
+	const uniqueIds = new Set(normalizedIds);
+	if (normalizedIds.length === 0 || uniqueIds.size !== normalizedIds.length) return { ok: false as const, reason: 'invalid_ids' };
+
+	const rows = await env.STATE_DB.prepare(
+		`SELECT id
+    FROM promotion_list_items
+    WHERE item_type = ?
+    ORDER BY display_order ASC, updated_at DESC, id ASC`
+	)
+		.bind(itemType)
+		.all<any>();
+	const currentIds = (rows.results ?? []).map((row) => String(row.id ?? ''));
+	if (currentIds.length !== normalizedIds.length) return { ok: false as const, reason: 'count_mismatch' };
+
+	const currentSet = new Set(currentIds);
+	for (const id of normalizedIds) if (!currentSet.has(id)) return { ok: false as const, reason: 'unknown_id' };
+
+	const now = new Date().toISOString();
+	const statements = normalizedIds.map((id, index) =>
+		env.STATE_DB.prepare('UPDATE promotion_list_items SET display_order = ?, updated_at = ? WHERE id = ?').bind(index + 1, now, id)
+	);
+	if (statements.length > 0) await env.STATE_DB.batch(statements);
+
+	return { ok: true as const, summary: await rebuildPromotionListCache(env) };
+}
+
 export async function getPromotionListPayload(env: Env): Promise<PromotionPayload> {
 	const payloadText = await loadPromotionPayloadText(env);
 	try {

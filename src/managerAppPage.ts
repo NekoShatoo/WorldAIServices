@@ -78,10 +78,14 @@ export function buildManagerAppPageHtml() {
               <option value="Avatar">Avatar</option>
               <option value="World">World</option>
             </select>
+            <button id="promotionSortEditButton" class="px-4 py-2 rounded-xl bg-violet-100 text-violet-700 font-semibold">並び替え編集</button>
+            <button id="promotionSortSaveButton" class="hidden px-4 py-2 rounded-xl bg-violet-600 text-white font-semibold hover:bg-violet-500">並び順を保存</button>
+            <button id="promotionSortCancelButton" class="hidden px-4 py-2 rounded-xl bg-violet-100 text-violet-700 font-semibold">編集終了</button>
             <button id="promotionCreateOpenButton" class="px-4 py-2 rounded-xl bg-violet-600 text-white font-semibold hover:bg-violet-500">新規追加</button>
             <button id="promotionReloadButton" class="px-4 py-2 rounded-xl bg-violet-100 text-violet-700 font-semibold">一覧再読込</button>
           </div>
         </div>
+        <p id="promotionSortHint" class="hidden text-xs text-[color:var(--mgr-muted)]">並び替え編集中です。項目をドラッグして順番を調整し、最後に保存してください。</p>
         <div class="space-y-2">
           <div class="flex items-center justify-between"><p class="text-sm font-semibold">API 使用率（上限 100MB）</p><button id="refreshPromotionUsageButton" class="px-3 py-1 rounded-lg bg-violet-100 text-violet-700 text-sm font-semibold">再計算</button></div>
           <div class="w-full h-4 bg-violet-100 rounded-full overflow-hidden"><div id="promotionUsageBar" class="h-full bg-violet-500" style="width: 0%"></div></div>
@@ -149,13 +153,12 @@ export function buildManagerAppPageHtml() {
     </div>
   </div>
   <div id="promotionImagePreviewModal" class="modal-backdrop hidden">
-    <div class="card w-full max-w-5xl p-4 space-y-3">
-      <div class="flex items-center justify-between">
-        <h3 class="text-lg font-bold">画像プレビュー（拡大）</h3>
+    <div class="w-full h-full p-4 flex flex-col gap-3">
+      <div class="flex justify-end">
         <button id="promotionImagePreviewCloseButton" class="px-3 py-1 rounded bg-violet-100 text-violet-700 text-sm font-semibold">閉じる</button>
       </div>
-      <div class="w-full max-h-[75vh] overflow-auto flex items-center justify-center bg-violet-50 rounded-xl p-3">
-        <img id="promotionImagePreviewLarge" class="max-w-full h-auto rounded-lg border border-[color:var(--mgr-border)] bg-white" alt="promotion-preview-large" />
+      <div class="flex-1 overflow-auto flex items-center justify-center">
+        <img id="promotionImagePreviewLarge" class="max-w-full max-h-full object-contain" alt="promotion-preview-large" />
       </div>
     </div>
   </div>
