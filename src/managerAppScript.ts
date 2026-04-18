@@ -11,6 +11,8 @@ export const MANAGER_APP_SCRIPT = `
       promotionUploadedImageDataUrl: "",
       promotionSortEditMode: false,
       promotionSortDraftIds: [],
+      promotionDragAutoScrollRaf: 0,
+      promotionDragAutoScrollSpeed: 0,
     };
     if (!state.token) location.href = "/mgr";
 
@@ -359,6 +361,42 @@ export const MANAGER_APP_SCRIPT = `
 
     function bindPromotionSortDragEvents() {
       let draggingId = "";
+      function stopPromotionDragAutoScroll() {
+        state.promotionDragAutoScrollSpeed = 0;
+        if (!state.promotionDragAutoScrollRaf) return;
+        cancelAnimationFrame(state.promotionDragAutoScrollRaf);
+        state.promotionDragAutoScrollRaf = 0;
+      }
+
+      function ensurePromotionDragAutoScroll() {
+        if (state.promotionDragAutoScrollRaf) return;
+        const tick = () => {
+          state.promotionDragAutoScrollRaf = 0;
+          if (!state.promotionDragAutoScrollSpeed) return;
+          ui.promotionItemsList.scrollTop += state.promotionDragAutoScrollSpeed;
+          ensurePromotionDragAutoScroll();
+        };
+        state.promotionDragAutoScrollRaf = requestAnimationFrame(tick);
+      }
+
+      function updatePromotionDragAutoScroll(clientY) {
+        const rect = ui.promotionItemsList.getBoundingClientRect();
+        const edge = 52;
+        let speed = 0;
+        if (clientY < rect.top + edge) speed = -Math.min(20, Math.max(4, Math.floor((rect.top + edge - clientY) / 3)));
+        else if (clientY > rect.bottom - edge) speed = Math.min(20, Math.max(4, Math.floor((clientY - (rect.bottom - edge)) / 3)));
+        state.promotionDragAutoScrollSpeed = speed;
+        if (speed) ensurePromotionDragAutoScroll();
+        else stopPromotionDragAutoScroll();
+      }
+
+      ui.promotionItemsList.addEventListener("dragover", (event) => {
+        event.preventDefault();
+        updatePromotionDragAutoScroll(event.clientY);
+      });
+      ui.promotionItemsList.addEventListener("dragleave", () => stopPromotionDragAutoScroll());
+      ui.promotionItemsList.addEventListener("drop", () => stopPromotionDragAutoScroll());
+
       Array.from(ui.promotionItemsList.querySelectorAll("[data-promotion-drag-id]")).forEach((element) => {
         element.addEventListener("dragstart", () => {
           draggingId = String(element.getAttribute("data-promotion-drag-id") || "");
@@ -367,8 +405,12 @@ export const MANAGER_APP_SCRIPT = `
         element.addEventListener("dragend", () => {
           element.classList.remove("opacity-60");
           draggingId = "";
+          stopPromotionDragAutoScroll();
         });
-        element.addEventListener("dragover", (event) => event.preventDefault());
+        element.addEventListener("dragover", (event) => {
+          event.preventDefault();
+          updatePromotionDragAutoScroll(event.clientY);
+        });
         element.addEventListener("drop", (event) => {
           event.preventDefault();
           const targetId = String(element.getAttribute("data-promotion-drag-id") || "");
