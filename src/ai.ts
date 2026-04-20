@@ -91,18 +91,35 @@ function buildAiFailureResponse(error: any, latencyMs: number) {
 		return {
 			ok: false as const,
 			reason: 'timeout',
-			publicReason: 'AI request timeout',
+			publicReason: `AI request timeout (latencyMs=${latencyMs})`,
 			latencyMs,
 		};
 	}
 
 	const reason = error instanceof Error ? error.message : String(error);
+	const sanitizedReason = sanitizePublicErrorText(reason);
 	return {
 		ok: false as const,
 		reason,
-		publicReason: 'AI request failed',
+		publicReason: `AI request failed: ${sanitizedReason}`,
 		latencyMs,
 	};
+}
+
+function sanitizePublicErrorText(value: string) {
+	const normalized = value.trim().length > 0 ? value : 'unknown_error';
+	return normalized
+		.replace(/https?:\/\/[^\s"']+/gi, '[redacted-url]')
+		.replace(/(Bearer\s+)[A-Za-z0-9._-]+/gi, '$1[redacted-token]')
+		.replace(/\bsk-[A-Za-z0-9_-]+\b/g, '[redacted-key]')
+		.replace(/\b[A-Za-z0-9_-]{24,}\b/g, (token) => (looksSensitiveToken(token) ? '[redacted-secret]' : token))
+		.slice(0, 220);
+}
+
+function looksSensitiveToken(token: string) {
+	const hasLetter = /[A-Za-z]/.test(token);
+	const hasDigit = /\d/.test(token);
+	return hasLetter && hasDigit;
 }
 
 function buildLlmRequestEntry(metadata: any, providerMode: string, lang: string, text: string, result: any): LlmRequestEntry {

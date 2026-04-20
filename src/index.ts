@@ -84,7 +84,7 @@ async function handleTranslate(request: Request, env: Env, ctx: ExecutionContext
 	if (!parsed) return jsonResponse({ status: 'error', result: 'Invalid request' }, 400);
 
 	const text = parsed.text.trim();
-	if (text.length === 0) return jsonResponse({ status: 'ok', result: '' });
+	if (text.length === 0) return buildCacheableTranslateResponse({ status: 'ok', result: '' });
 
 	if (countCharacters(text) > config.maxChars) return jsonResponse({ status: 'error', result: 'Text too long' }, 400);
 
@@ -102,7 +102,7 @@ async function handleTranslate(request: Request, env: Env, ctx: ExecutionContext
 				aiFailure: false,
 			})
 		);
-		return jsonResponse({ status: 'ok', result: cached });
+		return buildCacheableTranslateResponse({ status: 'ok', result: cached });
 	}
 
 	const clientIp = request.headers.get('CF-Connecting-IP') ?? 'unknown';
@@ -123,7 +123,7 @@ async function handleTranslate(request: Request, env: Env, ctx: ExecutionContext
 	}
 
 	ctx.waitUntil(recordTranslationOutcome(env, parsed.lang, countCharacters(text), translation));
-	return jsonResponse({ status: 'ok', result: translation.result });
+	return buildCacheableTranslateResponse({ status: 'ok', result: translation.result });
 }
 
 function parseTranslateQuery(url: URL) {
@@ -164,6 +164,16 @@ function handleManagerAppPage() {
 
 async function handlePromotionList(env: Env) {
 	return new Response(JSON.stringify(await getPromotionListPayload(env)), {
+		status: 200,
+		headers: {
+			...JSON_HEADERS,
+			'cache-control': 'public, max-age=60, s-maxage=300, stale-while-revalidate=600',
+		},
+	});
+}
+
+function buildCacheableTranslateResponse(data: unknown) {
+	return new Response(JSON.stringify(data), {
 		status: 200,
 		headers: {
 			...JSON_HEADERS,

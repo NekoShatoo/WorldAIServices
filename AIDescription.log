@@ -156,3 +156,6 @@ PromotionList 仕様
 - PromotionList に「API設定」ページを追加し、公開APIの Image 返却ON/OFFを管理できるようにした
 - 画像返却をOFFにした場合も JSON の `Image` フィールド自体は削除せず、空文字を返す
 - 設定変更時は公開キャッシュJSONを再生成する
+
+- 翻訳API `/trans` の成功レスポンスは `Cache-Control: public, max-age=60, s-maxage=300, stale-while-revalidate=600` を返すようにし、CDN再利用を有効化した
+- AI失敗時の `result` は詳細化し、`AI request failed: ...` / `AI request timeout (latencyMs=...)` を返すようにした（URL・Bearer・APIキー形式文字列・長い疑似シークレットはマスク）
