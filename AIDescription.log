@@ -159,3 +159,4 @@ PromotionList 仕様
 
 - 翻訳API `/trans` の成功レスポンスは `Cache-Control: public, max-age=60, s-maxage=300, stale-while-revalidate=600` を返すようにし、CDN再利用を有効化した
 - AI失敗時の `result` は詳細化し、`AI request failed: ...` / `AI request timeout (latencyMs=...)` を返すようにした（URL・Bearer・APIキー形式文字列・長い疑似シークレットはマスク）
+- PromotionList 使用率が 0 固定になる問題を修正した。原因は D1 から返る数値が文字列のとき `safeMetricNumber` が 0 扱いになる実装で、文字列数値を `Number(...)` 変換してから評価するように変更した

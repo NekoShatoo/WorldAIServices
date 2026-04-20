@@ -74,5 +74,6 @@ export function buildPreviewText(value: any, maxLength: number) {
 }
 
 export function safeMetricNumber(value: any): number {
-	return Number.isFinite(value) && value > 0 ? Math.floor(value) : 0;
+	const numeric = typeof value === 'number' ? value : Number(value);
+	return Number.isFinite(numeric) && numeric > 0 ? Math.floor(numeric) : 0;
 }
