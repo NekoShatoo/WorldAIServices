@@ -69,6 +69,10 @@ export function buildManagerAppPageHtml() {
           <input id="simulateTextInput" placeholder="翻訳対象テキスト" class="md:col-span-2 border rounded-xl px-3 py-2 border-[color:var(--mgr-border)]" />
         </div>
         <button id="simulateButton" class="px-4 py-2 rounded-xl bg-violet-600 text-white font-semibold hover:bg-violet-500">simulate 実行</button>
+        <div id="simulateResultBox" class="hidden rounded-xl border border-[color:var(--mgr-border)] bg-violet-50 p-3 space-y-2">
+          <p class="text-sm font-semibold">simulate 結果</p>
+          <pre id="simulateResultText" class="text-xs whitespace-pre-wrap break-all text-[color:var(--mgr-text)]"></pre>
+        </div>
       </section>
 
       <section id="panel-promotion-manage" class="card p-5 space-y-4 hidden">

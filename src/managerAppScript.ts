@@ -37,6 +37,8 @@ export const MANAGER_APP_SCRIPT = `
       simulateLangInput: document.getElementById("simulateLangInput"),
       simulateTextInput: document.getElementById("simulateTextInput"),
       simulateButton: document.getElementById("simulateButton"),
+      simulateResultBox: document.getElementById("simulateResultBox"),
+      simulateResultText: document.getElementById("simulateResultText"),
       dayChartCanvas: document.getElementById("dayChart"),
       langChartCanvas: document.getElementById("langChart"),
       navItems: Array.from(document.querySelectorAll(".nav-item")),
@@ -116,6 +118,11 @@ export const MANAGER_APP_SCRIPT = `
       }
       if (data.status !== "ok") console.error("[mgr]", path, data);
       return { response, data };
+    }
+
+    function showSimulateResult(data) {
+      ui.simulateResultBox.classList.remove("hidden");
+      ui.simulateResultText.textContent = JSON.stringify(data, null, 2);
     }
 
     function upsertDayChart(day) {
@@ -624,7 +631,14 @@ export const MANAGER_APP_SCRIPT = `
     ui.llmButton.addEventListener("click", async () => callApi("/llmrequests?limit=10"));
     ui.resetCacheButton.addEventListener("click", async () => confirm("translation_cache を全削除します。よろしいですか？") ? callApi("/resetcache", { method: "POST", body: "{}" }) : null);
     ui.pingButton.addEventListener("click", async () => callApi("/ping", { method: "POST", body: "{}" }));
-    ui.simulateButton.addEventListener("click", async () => callApi("/simulate", { method: "POST", body: JSON.stringify({ lang: ui.simulateLangInput.value, text: ui.simulateTextInput.value }) }));
+    ui.simulateButton.addEventListener("click", async () => {
+      ui.simulateButton.disabled = true;
+      ui.simulateResultBox.classList.remove("hidden");
+      ui.simulateResultText.textContent = "実行中...";
+      const result = await callApi("/simulate", { method: "POST", body: JSON.stringify({ lang: ui.simulateLangInput.value, text: ui.simulateTextInput.value }) });
+      showSimulateResult(result.data);
+      ui.simulateButton.disabled = false;
+    });
 
     ui.promotionCreateOpenButton.addEventListener("click", () => openPromotionModal("create"));
     ui.promotionSortEditButton.addEventListener("click", () => {
