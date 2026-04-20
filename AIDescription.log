@@ -150,3 +150,9 @@ PromotionList 仕様
 - 並び替えドラッグ中に一覧の上下端へ寄せると自動スクロールするようにし、長距離移動を可能にした
 
 - 登録済み一覧の先頭に固定サイズサムネイルを表示し、非同期デコード完了までローディングスピナーを出す方式にした
+
+- 公開 `GET /PromotionList` は `Cache-Control: public, max-age=60, s-maxage=300, stale-while-revalidate=600` を返し、ブラウザ/エッジでの再利用を有効化した
+
+- PromotionList に「API設定」ページを追加し、公開APIの Image 返却ON/OFFを管理できるようにした
+- 画像返却をOFFにした場合も JSON の `Image` フィールド自体は削除せず、空文字を返す
+- 設定変更時は公開キャッシュJSONを再生成する

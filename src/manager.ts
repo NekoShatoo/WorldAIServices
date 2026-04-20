@@ -12,6 +12,8 @@ import {
 	updatePromotionItem,
 	movePromotionItem,
 	reorderPromotionItems,
+	loadPromotionApiConfig,
+	updatePromotionApiConfig,
 } from './database';
 import { TRANSLATION_PROMPT_VERSION } from './constants';
 import { jsonResponse, clampInteger, countCharacters } from './utils';
@@ -181,6 +183,17 @@ export async function handleManagerApi(request: Request, env: Env, ctx: Executio
 		return jsonResponse({ status: 'ok', result: await getPromotionListUsage(env) });
 	}
 
+	if (path === '/promotion/api-config' && request.method === 'GET') {
+		return jsonResponse({ status: 'ok', result: await loadPromotionApiConfig(env) });
+	}
+
+	if (path === '/promotion/api-config' && request.method === 'POST') {
+		const body = await readJsonBody(request);
+		const includeImageInResponse = typeof body?.includeImageInResponse === 'boolean' ? body.includeImageInResponse : true;
+		const summary = await updatePromotionApiConfig(env, includeImageInResponse);
+		return jsonResponse({ status: 'ok', result: { includeImageInResponse, summary } });
+	}
+
 	if (path === '/promotion/items' && request.method === 'GET') {
 		const type = String(url.searchParams.get('type') ?? '') as PromotionItemType;
 		if (type && type !== 'Avatar' && type !== 'World') return jsonResponse({ status: 'error', result: 'type は Avatar または World を指定してください。' }, 400);
@@ -301,7 +314,7 @@ export async function handleManagerApi(request: Request, env: Env, ctx: Executio
 					'公開API: GET /PromotionList',
 					'レスポンスは { Avatar: PromotionItem[], World: PromotionItem[] }',
 					'PromotionItem: Title / Anchor / Description / Link / ID / Image',
-					'Image は Base64 文字列',
+					'Image は設定により Base64 文字列 または 空文字を返す',
 					'公開APIは都度集計せず、管理画面更新時に再生成したキャッシュJSONを返す',
 					'JSON 総サイズ上限は 100MB',
 				],

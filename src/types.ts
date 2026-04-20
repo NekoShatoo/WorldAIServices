@@ -113,3 +113,7 @@ export interface PromotionPayload {
 	Avatar: PromotionItem[];
 	World: PromotionItem[];
 }
+
+export interface PromotionApiConfig {
+	includeImageInResponse: boolean;
+}

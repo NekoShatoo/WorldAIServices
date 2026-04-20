@@ -1,6 +1,6 @@
 import { AutoRouter } from 'itty-router';
 import { Env } from './types';
-import { jsonResponse, countCharacters, buildCacheKey } from './utils';
+import { jsonResponse, countCharacters, buildCacheKey, JSON_HEADERS } from './utils';
 import { TRANSLATION_PROMPT_VERSION } from './constants';
 import { loadConfig, getCachedTranslation, runDatabaseMaintenance, recordError, checkRateLimit, recordTranslationStats, getPromotionListPayload } from './database';
 import { executeTranslation, recordTranslationOutcome } from './translation';
@@ -163,5 +163,11 @@ function handleManagerAppPage() {
 }
 
 async function handlePromotionList(env: Env) {
-	return jsonResponse(await getPromotionListPayload(env));
+	return new Response(JSON.stringify(await getPromotionListPayload(env)), {
+		status: 200,
+		headers: {
+			...JSON_HEADERS,
+			'cache-control': 'public, max-age=60, s-maxage=300, stale-while-revalidate=600',
+		},
+	});
 }

@@ -1,4 +1,16 @@
-import { Env, ServiceConfig, TranslationMetric, TranslationStatsSummary, TranslationStatsRecord, ErrorEntry, LlmRequestEntry, PromotionItem, PromotionItemType, PromotionPayload } from './types';
+import {
+	Env,
+	ServiceConfig,
+	TranslationMetric,
+	TranslationStatsSummary,
+	TranslationStatsRecord,
+	ErrorEntry,
+	LlmRequestEntry,
+	PromotionItem,
+	PromotionItemType,
+	PromotionPayload,
+	PromotionApiConfig,
+} from './types';
 import { clampInteger, safeMetricNumber, parseStoredJsonObject, MAINTENANCE_BATCH_SIZE } from './utils';
 
 export const DEFAULT_CONFIG: ServiceConfig = Object.freeze({
@@ -10,6 +22,9 @@ export const DEFAULT_CONFIG: ServiceConfig = Object.freeze({
 });
 const PROMOTION_LIST_MAX_BYTES = 100 * 1024 * 1024;
 const PROMOTION_LIST_CHUNK_SIZE = 900000;
+const DEFAULT_PROMOTION_API_CONFIG: PromotionApiConfig = Object.freeze({
+	includeImageInResponse: true,
+});
 
 export async function loadConfig(env: Env): Promise<ServiceConfig> {
 	const db = env.STATE_DB;
@@ -479,6 +494,35 @@ export async function listPromotionItems(env: Env, itemType?: PromotionItemType)
 	}));
 }
 
+export async function loadPromotionApiConfig(env: Env): Promise<PromotionApiConfig> {
+	const row = await env.STATE_DB.prepare(
+		`SELECT include_image_in_response
+    FROM promotion_api_config
+    WHERE config_id = 1`
+	).first<any>();
+	if (!row) return { ...DEFAULT_PROMOTION_API_CONFIG };
+	return {
+		includeImageInResponse: normalizeBooleanFlag(row.include_image_in_response, DEFAULT_PROMOTION_API_CONFIG.includeImageInResponse),
+	};
+}
+
+export async function updatePromotionApiConfig(env: Env, includeImageInResponse: boolean) {
+	await env.STATE_DB.prepare(
+		`INSERT INTO promotion_api_config (
+      config_id,
+      include_image_in_response,
+      updated_at
+    ) VALUES (1, ?, ?)
+    ON CONFLICT(config_id) DO UPDATE SET
+      include_image_in_response = excluded.include_image_in_response,
+      updated_at = excluded.updated_at`
+	)
+		.bind(includeImageInResponse ? 1 : 0, new Date().toISOString())
+		.run();
+
+	return await rebuildPromotionListCache(env);
+}
+
 export async function createPromotionItem(
 	env: Env,
 	itemType: PromotionItemType,
@@ -666,6 +710,7 @@ export async function rebuildPromotionListCache(env: Env) {
 }
 
 async function buildPromotionPayloadFromItems(env: Env): Promise<PromotionPayload> {
+	const apiConfig = await loadPromotionApiConfig(env);
 	const result = await env.STATE_DB.prepare(
 		`SELECT
       id,
@@ -686,7 +731,7 @@ async function buildPromotionPayloadFromItems(env: Env): Promise<PromotionPayloa
 			Anchor: String(row.anchor ?? ''),
 			Description: String(row.description ?? ''),
 			Link: String(row.link ?? ''),
-			Image: String(row.image ?? ''),
+			Image: apiConfig.includeImageInResponse ? String(row.image ?? '') : '',
 		};
 		const type = String(row.item_type ?? '');
 		if (type === 'Avatar') payload.Avatar.push(item);

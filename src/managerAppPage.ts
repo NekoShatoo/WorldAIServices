@@ -20,6 +20,7 @@ export function buildManagerAppPageHtml() {
       <div class="pt-2 border-t border-violet-100">
         <p class="text-xs font-semibold text-[color:var(--mgr-muted)] mb-1">PromotionList</p>
         <button class="nav-item" data-panel="promotion-manage">項目管理</button>
+        <button class="nav-item" data-panel="promotion-api-setting">API設定</button>
         <button class="nav-item" data-panel="docs-promotion">説明ページ</button>
       </div>
       <button id="logoutButton" class="mt-3 px-3 py-2 rounded-lg bg-violet-100 text-violet-700 text-sm font-semibold">ログアウト</button>
@@ -95,6 +96,16 @@ export function buildManagerAppPageHtml() {
           <h3 class="text-sm font-semibold mb-2">登録済み項目</h3>
           <div id="promotionItemsList" class="space-y-2 text-sm max-h-[28rem] overflow-y-auto pr-1"></div>
         </div>
+      </section>
+
+      <section id="panel-promotion-api-setting" class="card p-5 space-y-4 hidden">
+        <h2 class="text-xl font-bold">PromotionList / API設定</h2>
+        <p class="text-sm text-[color:var(--mgr-muted)]">公開APIで画像データを返すかを設定します。変更後はキャッシュJSONを再生成します。</p>
+        <label class="text-sm flex items-center gap-2">
+          <input id="promotionIncludeImageInput" type="checkbox" checked />
+          <span>公開APIでImage(Base64)を返す</span>
+        </label>
+        <button id="promotionSaveApiSettingButton" class="px-4 py-2 rounded-xl bg-violet-600 text-white font-semibold hover:bg-violet-500">API設定を保存</button>
       </section>
 
       <section id="panel-docs-ai" class="card p-5 hidden"><h2 class="text-xl font-bold mb-3">AIサービス 説明ページ</h2><div id="docsAiBody" class="text-sm space-y-1 text-[color:var(--mgr-text)]"></div></section>

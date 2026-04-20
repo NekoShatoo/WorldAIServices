@@ -14,6 +14,7 @@ export const MANAGER_APP_SCRIPT = `
       promotionDragAutoScrollRaf: 0,
       promotionDragAutoScrollSpeed: 0,
       promotionThumbRenderToken: 0,
+      promotionApiConfig: { includeImageInResponse: true },
     };
     if (!state.token) location.href = "/mgr";
 
@@ -45,6 +46,7 @@ export const MANAGER_APP_SCRIPT = `
         "ai-operation": document.getElementById("panel-ai-operation"),
         "ai-tools": document.getElementById("panel-ai-tools"),
         "promotion-manage": document.getElementById("panel-promotion-manage"),
+        "promotion-api-setting": document.getElementById("panel-promotion-api-setting"),
         "docs-ai": document.getElementById("panel-docs-ai"),
         "docs-promotion": document.getElementById("panel-docs-promotion"),
       },
@@ -59,6 +61,8 @@ export const MANAGER_APP_SCRIPT = `
       promotionSortSaveButton: document.getElementById("promotionSortSaveButton"),
       promotionSortCancelButton: document.getElementById("promotionSortCancelButton"),
       promotionSortHint: document.getElementById("promotionSortHint"),
+      promotionIncludeImageInput: document.getElementById("promotionIncludeImageInput"),
+      promotionSaveApiSettingButton: document.getElementById("promotionSaveApiSettingButton"),
       docsAiBody: document.getElementById("docsAiBody"),
       docsPromotionBody: document.getElementById("docsPromotionBody"),
       promotionModal: document.getElementById("promotionModal"),
@@ -481,6 +485,11 @@ export const MANAGER_APP_SCRIPT = `
     }
 
     async function loadPromotionData() {
+      const apiConfigResult = (await callApi("/promotion/api-config")).data;
+      if (apiConfigResult.status === "ok") {
+        state.promotionApiConfig = apiConfigResult.result;
+        ui.promotionIncludeImageInput.checked = !!state.promotionApiConfig.includeImageInResponse;
+      }
       const usageResult = (await callApi("/promotion/usage")).data;
       if (usageResult.status === "ok") {
         state.promotionUsage = usageResult.result;
@@ -643,6 +652,16 @@ export const MANAGER_APP_SCRIPT = `
     });
     ui.promotionReloadButton.addEventListener("click", loadPromotionData);
     ui.refreshPromotionUsageButton.addEventListener("click", loadPromotionData);
+    ui.promotionSaveApiSettingButton.addEventListener("click", async () => {
+      const includeImageInResponse = !!ui.promotionIncludeImageInput.checked;
+      const result = (await callApi("/promotion/api-config", { method: "POST", body: JSON.stringify({ includeImageInResponse }) })).data;
+      if (result.status !== "ok") {
+        alert("API設定の保存に失敗しました。");
+        return;
+      }
+      state.promotionApiConfig.includeImageInResponse = includeImageInResponse;
+      await loadPromotionData();
+    });
     ui.promotionFilterType.addEventListener("change", () => {
       state.promotionSortEditMode = false;
       syncPromotionSortEditUi();
