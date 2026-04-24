@@ -49,6 +49,10 @@ export const MANAGER_COMMON_STYLE = `
       z-index: 40;
       padding: 16px;
     }
+    .modal-card-scroll {
+      max-height: calc(100vh - 32px);
+      overflow-y: auto;
+    }
     .loading-overlay {
       position: absolute;
       inset: 0;

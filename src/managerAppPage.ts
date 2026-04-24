@@ -133,7 +133,7 @@ export function buildManagerAppPageHtml() {
   </div>
 
   <div id="promotionModal" class="modal-backdrop hidden">
-    <div class="card w-full max-w-3xl p-5 space-y-4">
+    <div class="card modal-card-scroll w-full max-w-3xl p-5 space-y-4">
       <div class="flex items-center justify-between">
         <h3 id="promotionModalTitle" class="text-lg font-bold">PromotionList 追加</h3>
         <button id="promotionModalCloseButton" class="px-3 py-1 rounded bg-violet-100 text-violet-700 text-sm font-semibold">閉じる</button>
@@ -198,7 +198,7 @@ export function buildManagerAppPageHtml() {
     </div>
   </div>
   <div id="promotionConvertModal" class="modal-backdrop hidden">
-    <div class="card w-full max-w-3xl p-5 space-y-4">
+    <div class="card modal-card-scroll w-full max-w-3xl p-5 space-y-4">
       <div class="flex items-center justify-between gap-3">
         <div>
           <h3 id="promotionConvertModalTitle" class="text-lg font-bold">画像変換</h3>
