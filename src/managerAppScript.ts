@@ -97,6 +97,7 @@ export const MANAGER_APP_SCRIPT = `
       promotionCompressEnabled: document.getElementById("promotionCompressEnabled"),
       promotionCompressMaxSize: document.getElementById("promotionCompressMaxSize"),
       promotionImageSizeWarning: document.getElementById("promotionImageSizeWarning"),
+      promotionImageMultipleOf4Status: document.getElementById("promotionImageMultipleOf4Status"),
       promotionResizeToMultipleOf4Button: document.getElementById("promotionResizeToMultipleOf4Button"),
       promotionImageDimensionText: document.getElementById("promotionImageDimensionText"),
       promotionTypeInput: document.getElementById("promotionTypeInput"),
@@ -262,18 +263,42 @@ export const MANAGER_APP_SCRIPT = `
       return "画像サイズ: " + meta.width + " x " + meta.height + " / " + (meta.hasAlpha ? "透明あり" : "透明なし");
     }
 
+    function renderMultipleOf4Status(meta) {
+      const element = ui.promotionImageMultipleOf4Status;
+      if (!meta) {
+        element.classList.add("hidden");
+        element.textContent = "";
+        element.className = "hidden md:col-span-2 rounded-xl border px-4 py-3 text-sm font-semibold";
+        return;
+      }
+
+      const passed = isImageMetaConvertible(meta);
+      element.className = "md:col-span-2 rounded-xl border px-4 py-3 text-sm font-semibold";
+      if (passed) {
+        element.classList.add("bg-emerald-50", "border-emerald-200", "text-emerald-700");
+        element.textContent = "4の倍数チェック: 通过（この画像はそのまま変換できます）";
+        return;
+      }
+
+      element.classList.add("bg-red-50", "border-red-200", "text-red-700");
+      element.textContent = "4の倍数チェック: 不通过（縦横とも 4 の倍数である必要があります）";
+    }
+
     async function refreshPromotionImageDimensionText() {
       const imageValue = ui.promotionImageInput.value.trim();
       if (!imageValue) {
         ui.promotionImageDimensionText.textContent = "画像サイズ: -";
+        renderMultipleOf4Status(null);
         return null;
       }
       try {
         const meta = await getImageMetaFromBase64(imageValue);
         ui.promotionImageDimensionText.textContent = formatImageMeta(meta);
+        renderMultipleOf4Status(meta);
         return meta;
       } catch (error) {
         ui.promotionImageDimensionText.textContent = "画像サイズ: 読み取り失敗";
+        renderMultipleOf4Status(null);
         console.error("[mgr] 画像メタ取得に失敗しました", error);
         return null;
       }
@@ -763,6 +788,7 @@ export const MANAGER_APP_SCRIPT = `
       updatePromotionImageSizeWarning();
       setPromotionImagePreview("");
       ui.promotionImageDimensionText.textContent = "画像サイズ: -";
+      renderMultipleOf4Status(null);
       endPromotionSubmitProgress();
       state.promotionEditingId = "";
       state.promotionUploadedImageDataUrl = "";

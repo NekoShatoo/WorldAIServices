@@ -146,6 +146,7 @@ export function buildManagerAppPageHtml() {
           </div>
         </div>
         <p id="promotionImageSizeWarning" class="text-xs text-yellow-700 md:col-span-2 hidden">512を超える画像は容量を圧迫する可能性があります。</p>
+        <div id="promotionImageMultipleOf4Status" class="hidden md:col-span-2 rounded-xl border px-4 py-3 text-sm font-semibold"></div>
         <div class="md:col-span-2 flex flex-wrap items-center gap-2">
           <button id="promotionResizeToMultipleOf4Button" type="button" class="px-3 py-2 rounded-lg bg-violet-100 text-violet-700 text-sm font-semibold">4の倍数へ拡大して保存内容に反映</button>
           <p id="promotionImageDimensionText" class="text-xs text-[color:var(--mgr-muted)]">画像サイズ: -</p>
