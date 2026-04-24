@@ -221,6 +221,14 @@ export function buildManagerAppPageHtml() {
           <div id="promotionConvertEncoderSummary" class="text-xs whitespace-pre-wrap text-[color:var(--mgr-text)]"></div>
         </div>
       </div>
+      <div id="promotionConvertDownloadSection" class="hidden rounded-xl border border-[color:var(--mgr-border)] bg-white p-3 space-y-2">
+        <p class="text-sm font-semibold">変換済みバイナリをダウンロード</p>
+        <div class="flex flex-wrap gap-2">
+          <button id="promotionConvertDownloadPcButton" class="hidden px-4 py-2 rounded-xl bg-sky-100 text-sky-700 font-semibold">PC をダウンロード</button>
+          <button id="promotionConvertDownloadAndroidButton" class="hidden px-4 py-2 rounded-xl bg-emerald-100 text-emerald-700 font-semibold">Android をダウンロード</button>
+          <button id="promotionConvertDownloadIosButton" class="hidden px-4 py-2 rounded-xl bg-amber-100 text-amber-700 font-semibold">iOS をダウンロード</button>
+        </div>
+      </div>
       <div class="rounded-xl border border-[color:var(--mgr-border)] bg-violet-50 p-3 space-y-2">
         <p class="text-sm font-semibold">変換ログ</p>
         <pre id="promotionConvertLog" class="text-xs whitespace-pre-wrap break-all text-[color:var(--mgr-text)] min-h-40 max-h-96 overflow-auto"></pre>

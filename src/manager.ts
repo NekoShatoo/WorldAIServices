@@ -15,6 +15,7 @@ import {
 	getPromotionItemById,
 	savePromotionPlatformImage,
 	clearPromotionPlatformImages,
+	getPromotionPlatformBinary,
 } from './database';
 import { TRANSLATION_PROMPT_VERSION } from './constants';
 import { jsonResponse, clampInteger, countCharacters } from './utils';
@@ -336,6 +337,23 @@ export async function handleManagerApi(request: Request, env: Env, ctx: Executio
 		return jsonResponse({ status: 'ok', result: summary });
 	}
 
+	if (path === '/promotion/items/download' && request.method === 'GET') {
+		const id = String(url.searchParams.get('id') ?? '').trim();
+		const platform = String(url.searchParams.get('platform') ?? '').trim() as PromotionPlatform;
+		if (!id) return jsonResponse({ status: 'error', result: 'id を指定してください。' }, 400);
+		if (platform !== 'pc' && platform !== 'android' && platform !== 'ios') return jsonResponse({ status: 'error', result: 'platform は pc/android/ios を指定してください。' }, 400);
+		const binary = await getPromotionPlatformBinary(env, id, platform);
+		if (!binary) return jsonResponse({ status: 'error', result: 'not_found' }, 404);
+		return new Response(base64ToUint8Array(binary.base64), {
+			status: 200,
+			headers: {
+				'content-type': binary.contentType,
+				'cache-control': 'no-store',
+				'content-disposition': `attachment; filename="${binary.id}_${platform}.${binary.extension}"`,
+			},
+		});
+	}
+
 	if (path === '/docs/ai' && request.method === 'GET') {
 		return jsonResponse({
 			status: 'ok',
@@ -370,4 +388,11 @@ export async function handleManagerApi(request: Request, env: Env, ctx: Executio
 	}
 
 	return jsonResponse({ status: 'error', result: 'Not Found' }, 404);
+}
+
+function base64ToUint8Array(base64: string) {
+	const binary = atob(base64);
+	const bytes = new Uint8Array(binary.length);
+	for (let index = 0; index < binary.length; index += 1) bytes[index] = binary.charCodeAt(index);
+	return bytes;
 }

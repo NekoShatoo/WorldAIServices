@@ -187,4 +187,5 @@ PromotionList 仕様
 - 変換モーダルには各プラットフォームで使うエンコーダー設定を読み取り専用テキストで表示し、透明設定の切り替えに応じて即時更新する
 - 変換モーダルには「変換データを清空」ボタンも追加し、現在の項目の `pc/android/ios` 変換済みデータだけを削除できるようにした。原画像は保持する
 - 追加/編集モーダルと変換モーダルには `max-height` + `overflow-y: auto` を付け、画面高を超えてもモーダル内部だけ縦スクロールするようにした
+- 変換モーダルでは変換済みプラットフォームだけダウンロードボタンを表示し、`/mgr/api/promotion/items/download?id=...&platform=...` から Base64 化前の生バイナリ（pc は `.crn`、android/ios は `.ktx`）を直接保存できるようにした
 - 今回の `npx tsc --noEmit` では既存の `src/types.ts` の Durable Object 型エラー（`TranslationCoordinator` が `DurableObjectBranded` 制約を満たさない）が残っており、この変更起因の新規エラーは確認されなかった

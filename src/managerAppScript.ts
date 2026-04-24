@@ -138,6 +138,10 @@ export const MANAGER_APP_SCRIPT = `
       promotionConvertRunButton: document.getElementById("promotionConvertRunButton"),
       promotionConvertHasAlphaInput: document.getElementById("promotionConvertHasAlphaInput"),
       promotionConvertEncoderSummary: document.getElementById("promotionConvertEncoderSummary"),
+      promotionConvertDownloadSection: document.getElementById("promotionConvertDownloadSection"),
+      promotionConvertDownloadPcButton: document.getElementById("promotionConvertDownloadPcButton"),
+      promotionConvertDownloadAndroidButton: document.getElementById("promotionConvertDownloadAndroidButton"),
+      promotionConvertDownloadIosButton: document.getElementById("promotionConvertDownloadIosButton"),
       promotionConvertLog: document.getElementById("promotionConvertLog"),
       globalLoadingOverlay: document.getElementById("globalLoadingOverlay"),
       globalLoadingText: document.getElementById("globalLoadingText"),
@@ -299,6 +303,14 @@ export const MANAGER_APP_SCRIPT = `
 
     function refreshConvertEncoderSummary() {
       ui.promotionConvertEncoderSummary.textContent = getPlatformEncoderSummaryText(state.currentConvertHasAlpha);
+    }
+
+    function refreshConvertDownloadButtons() {
+      const convertedPlatforms = new Set(state.currentPromotionDetail?.ConvertedPlatforms || []);
+      ui.promotionConvertDownloadPcButton.classList.toggle("hidden", !convertedPlatforms.has("pc"));
+      ui.promotionConvertDownloadAndroidButton.classList.toggle("hidden", !convertedPlatforms.has("android"));
+      ui.promotionConvertDownloadIosButton.classList.toggle("hidden", !convertedPlatforms.has("ios"));
+      ui.promotionConvertDownloadSection.classList.toggle("hidden", convertedPlatforms.size === 0);
     }
 
     function renderMultipleOf4Status(meta) {
@@ -936,6 +948,7 @@ export const MANAGER_APP_SCRIPT = `
       state.currentConvertHasAlpha = !!meta?.hasAlpha;
       ui.promotionConvertHasAlphaInput.checked = state.currentConvertHasAlpha;
       refreshConvertEncoderSummary();
+      refreshConvertDownloadButtons();
       ui.promotionConvertModalMeta.textContent = formatImageMeta(meta);
       ui.promotionConvertLog.textContent = "";
       appendConvertLog("対象ID: " + item.ID);
@@ -956,6 +969,7 @@ export const MANAGER_APP_SCRIPT = `
       state.currentConvertItemId = "";
       state.currentPromotionDetail = null;
       state.currentConvertHasAlpha = false;
+      refreshConvertDownloadButtons();
       ui.promotionConvertLog.textContent = "";
     }
 
@@ -975,6 +989,8 @@ export const MANAGER_APP_SCRIPT = `
         const savedItem = await savePromotionItem(Object.assign({}, item, { Image: resized.base64 }), "4 の倍数サイズへ保存しています...");
         appendConvertLog("保存完了: " + resized.width + " x " + resized.height);
         if (savedItem) {
+          state.currentPromotionDetail = savedItem;
+          refreshConvertDownloadButtons();
           ui.promotionConvertModalMeta.textContent = formatImageMeta(await getImageMetaFromBase64(savedItem.Image));
         }
       } finally {
@@ -1013,6 +1029,8 @@ export const MANAGER_APP_SCRIPT = `
           }
           appendConvertLog("[" + platform + "] 完了: " + result.result.textureFormat + " / " + result.result.outputFormat + " / " + result.result.outputBytes + " bytes");
           await loadPromotionItems();
+          state.currentPromotionDetail = await loadPromotionItemDetail(item.ID);
+          refreshConvertDownloadButtons();
         }
         await loadPromotionUsage();
         invalidatePanels(PANEL_KEYS.dashboard);
@@ -1040,10 +1058,38 @@ export const MANAGER_APP_SCRIPT = `
         }
         await loadPromotionItems();
         state.currentPromotionDetail = await loadPromotionItemDetail(item.ID);
+        refreshConvertDownloadButtons();
         appendConvertLog("清空完了: pc / android / ios の変換データを削除しました。");
       } finally {
         setConvertModalBusy(false);
       }
+    }
+
+    async function downloadConvertedBinary(platform) {
+      const item = state.currentPromotionDetail;
+      if (!item) return;
+      const response = await fetch("/mgr/api/promotion/items/download?id=" + encodeURIComponent(item.ID) + "&platform=" + encodeURIComponent(platform), {
+        headers: {
+          authorization: "Bearer " + state.token,
+        },
+      });
+      if (!response.ok) {
+        appendConvertLog("[" + platform + "] ダウンロード失敗: HTTP " + response.status);
+        return;
+      }
+      const blob = await response.blob();
+      const objectUrl = URL.createObjectURL(blob);
+      const anchor = document.createElement("a");
+      anchor.href = objectUrl;
+      const fallbackExtension = platform === "pc" ? "crn" : "ktx";
+      const contentDisposition = response.headers.get("content-disposition") || "";
+      const match = contentDisposition.match(/filename="([^"]+)"/);
+      anchor.download = match ? match[1] : (item.ID + "_" + platform + "." + fallbackExtension);
+      document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+      URL.revokeObjectURL(objectUrl);
+      appendConvertLog("[" + platform + "] バイナリをダウンロードしました。");
     }
 
     async function deletePromotionItemById(id) {
@@ -1223,6 +1269,9 @@ export const MANAGER_APP_SCRIPT = `
         refreshConvertEncoderSummary();
         appendConvertLog("変換設定アルファを " + (state.currentConvertHasAlpha ? "あり" : "なし") + " に変更しました。");
       });
+      ui.promotionConvertDownloadPcButton.addEventListener("click", async () => await downloadConvertedBinary("pc"));
+      ui.promotionConvertDownloadAndroidButton.addEventListener("click", async () => await downloadConvertedBinary("android"));
+      ui.promotionConvertDownloadIosButton.addEventListener("click", async () => await downloadConvertedBinary("ios"));
       ui.promotionConvertResizeButton.addEventListener("click", resizeCurrentConvertItemToMultipleOf4AndSave);
       ui.promotionConvertClearButton.addEventListener("click", clearCurrentPromotionConvertedData);
       ui.promotionConvertRunButton.addEventListener("click", runPromotionConversion);

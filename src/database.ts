@@ -1011,3 +1011,46 @@ export async function clearPromotionPlatformImages(env: Env, id: string) {
 		.run();
 	return await rebuildPromotionListCache(env);
 }
+
+export async function getPromotionPlatformBinary(env: Env, id: string, platform: PromotionPlatform) {
+	const row = await loadPromotionItemRecordById(env, id);
+	if (!row) return null;
+	const mapping = {
+		pc: {
+			image: String(row.image_pc ?? ''),
+			width: safeMetricNumber(row.image_pc_width),
+			height: safeMetricNumber(row.image_pc_height),
+			textureFormat: String(row.image_pc_texture_format ?? ''),
+			contentType: 'application/octet-stream',
+			extension: 'crn',
+		},
+		android: {
+			image: String(row.image_android ?? ''),
+			width: safeMetricNumber(row.image_android_width),
+			height: safeMetricNumber(row.image_android_height),
+			textureFormat: String(row.image_android_texture_format ?? ''),
+			contentType: 'image/ktx',
+			extension: 'ktx',
+		},
+		ios: {
+			image: String(row.image_ios ?? ''),
+			width: safeMetricNumber(row.image_ios_width),
+			height: safeMetricNumber(row.image_ios_height),
+			textureFormat: String(row.image_ios_texture_format ?? ''),
+			contentType: 'image/ktx',
+			extension: 'ktx',
+		},
+	};
+	const target = mapping[platform];
+	if (!target.image) return null;
+	return {
+		id: String(row.id ?? ''),
+		platform,
+		base64: target.image,
+		width: target.width,
+		height: target.height,
+		textureFormat: target.textureFormat,
+		contentType: target.contentType,
+		extension: target.extension,
+	};
+}
