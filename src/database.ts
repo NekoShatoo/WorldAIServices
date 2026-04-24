@@ -29,6 +29,7 @@ const EMPTY_PROMOTION_PLATFORM_PAYLOAD_BUNDLE: PromotionPlatformPayloadBundle = 
 	android: { Avatar: [], World: [] },
 	ios: { Avatar: [], World: [] },
 });
+const PROMOTION_PLATFORMS: PromotionPlatform[] = ['pc', 'android', 'ios'];
 
 export async function loadConfig(env: Env): Promise<ServiceConfig> {
 	const db = env.STATE_DB;
@@ -681,19 +682,20 @@ export async function reorderPromotionItems(env: Env, itemType: PromotionItemTyp
 }
 
 export async function getPromotionListPayload(env: Env, platform: PromotionPlatform): Promise<PromotionPayload> {
-	const payloadText = await loadPromotionPayloadText(env);
-	try {
-		const parsed = JSON.parse(payloadText);
-		if (!parsed || typeof parsed !== 'object') return clonePromotionPayload(EMPTY_PROMOTION_PAYLOAD);
-		return normalizePromotionPayload((parsed as any)[platform]);
-	} catch {
-		return clonePromotionPayload(EMPTY_PROMOTION_PAYLOAD);
+	const payloadText = await loadPromotionPlatformPayloadText(env, platform);
+	if (payloadText) {
+		try {
+			return normalizePromotionPayload(JSON.parse(payloadText));
+		} catch {
+			return clonePromotionPayload(EMPTY_PROMOTION_PAYLOAD);
+		}
 	}
+
+	return await loadLegacyPromotionPayload(env, platform);
 }
 
 export async function getPromotionListUsage(env: Env) {
-	const payloadText = await loadPromotionPayloadText(env);
-	const usage = measurePromotionPayloadUsage(payloadText);
+	const usage = await loadPromotionCacheUsage(env);
 	return {
 		maxBytes: PROMOTION_LIST_MAX_BYTES,
 		total: usage.total,
@@ -701,36 +703,75 @@ export async function getPromotionListUsage(env: Env) {
 	};
 }
 
-export async function rebuildPromotionListCache(env: Env) {
-	const payloadBundle = await buildPromotionPayloadBundleFromItems(env);
-	const payloadText = JSON.stringify(payloadBundle);
-	const payloadBytes = new TextEncoder().encode(payloadText).length;
-	if (payloadBytes > PROMOTION_LIST_MAX_BYTES) throw new Error('promotion_payload_limit_exceeded');
+export async function rebuildPromotionListCache(env: Env, targetPlatforms: PromotionPlatform[] = PROMOTION_PLATFORMS) {
+	const normalizedPlatforms = targetPlatforms.filter((platform, index, array) => PROMOTION_PLATFORMS.includes(platform) && array.indexOf(platform) === index);
+	if (normalizedPlatforms.length === 0) {
+		return {
+			totalPayloadBytes: await loadPromotionPayloadBytes(env),
+			platforms: {},
+		};
+	}
 
-	const chunks = splitPromotionPayload(payloadText);
+	const payloadBundle = await buildPromotionPayloadBundleFromItems(env, normalizedPlatforms);
+	const platformPayloads = normalizedPlatforms.map((platform) => {
+		const payloadText = JSON.stringify(payloadBundle[platform]);
+		const payloadBytes = new TextEncoder().encode(payloadText).length;
+		return {
+			platform,
+			payloadText,
+			payloadBytes,
+			chunks: splitPromotionPayload(payloadText),
+		};
+	});
+
+	const currentUsage = await loadPromotionCacheUsage(env);
+	let totalPayloadBytes = currentUsage.total.usedBytes;
+	for (const payload of platformPayloads) {
+		totalPayloadBytes -= currentUsage.platforms[payload.platform].usedBytes;
+		totalPayloadBytes += payload.payloadBytes;
+	}
+	if (totalPayloadBytes > PROMOTION_LIST_MAX_BYTES) throw new Error('promotion_payload_limit_exceeded');
+
+	const now = new Date().toISOString();
 	const db = env.STATE_DB;
-	await db.prepare('DELETE FROM promotion_list_cache_chunks').run();
-	const statements = chunks.map((chunk, index) => db.prepare('INSERT INTO promotion_list_cache_chunks (chunk_index, chunk_text) VALUES (?, ?)').bind(index, chunk));
-	await db.batch(statements);
-	await db.prepare(
-		`INSERT INTO promotion_list_cache (
-      cache_id,
-      payload_total_bytes,
-      payload_updated_at
-    ) VALUES (1, ?, ?)
-    ON CONFLICT(cache_id) DO UPDATE SET
-      payload_total_bytes = excluded.payload_total_bytes,
-      payload_updated_at = excluded.payload_updated_at`
-	)
-		.bind(payloadBytes, new Date().toISOString())
-		.run();
+	const statements = [];
+	for (const payload of platformPayloads) {
+		statements.push(db.prepare('DELETE FROM promotion_list_platform_cache_chunks WHERE platform = ?').bind(payload.platform));
+		for (const [chunkIndex, chunkText] of payload.chunks.entries()) {
+			statements.push(
+				db.prepare('INSERT INTO promotion_list_platform_cache_chunks (platform, chunk_index, chunk_text) VALUES (?, ?, ?)').bind(payload.platform, chunkIndex, chunkText)
+			);
+		}
+		statements.push(
+			db.prepare(
+				`INSERT INTO promotion_list_platform_cache (
+	      platform,
+	      payload_bytes,
+	      payload_updated_at
+	    ) VALUES (?, ?, ?)
+	    ON CONFLICT(platform) DO UPDATE SET
+	      payload_bytes = excluded.payload_bytes,
+	      payload_updated_at = excluded.payload_updated_at`
+			).bind(payload.platform, payload.payloadBytes, now)
+		);
+	}
+	if (statements.length > 0) await db.batch(statements);
+
 	return {
-		payloadBytes,
-		chunkCount: chunks.length,
+		totalPayloadBytes,
+		platforms: Object.fromEntries(
+			platformPayloads.map((payload) => [
+				payload.platform,
+				{
+					payloadBytes: payload.payloadBytes,
+					chunkCount: payload.chunks.length,
+				},
+			])
+		),
 	};
 }
 
-async function buildPromotionPayloadBundleFromItems(env: Env): Promise<PromotionPlatformPayloadBundle> {
+async function buildPromotionPayloadBundleFromItems(env: Env, targetPlatforms: PromotionPlatform[]): Promise<PromotionPlatformPayloadBundle> {
 	const result = await env.STATE_DB.prepare(
 		`SELECT
       id,
@@ -752,9 +793,10 @@ async function buildPromotionPayloadBundleFromItems(env: Env): Promise<Promotion
       image_ios_height,
       image_ios_texture_format
     FROM promotion_list_items
-    ORDER BY item_type ASC, display_order ASC, updated_at DESC, id ASC`
+	    ORDER BY item_type ASC, display_order ASC, updated_at DESC, id ASC`
 	).all<any>();
 	const payloadBundle = clonePromotionPlatformPayloadBundle(EMPTY_PROMOTION_PLATFORM_PAYLOAD_BUNDLE);
+	const platformSet = new Set(targetPlatforms);
 	for (const row of result.results ?? []) {
 		const baseItem = {
 			ID: String(row.id ?? ''),
@@ -765,48 +807,75 @@ async function buildPromotionPayloadBundleFromItems(env: Env): Promise<Promotion
 		};
 		const type = String(row.item_type ?? '');
 		if (type !== 'Avatar' && type !== 'World') continue;
-		payloadBundle.pc[type].push({
-			...baseItem,
-			Image: String(row.image_pc ?? ''),
-			ImageWidth: safeMetricNumber(row.image_pc_width),
-			ImageHeight: safeMetricNumber(row.image_pc_height),
-			ImageTextureFormat: String(row.image_pc_texture_format ?? ''),
-		});
-		payloadBundle.android[type].push({
-			...baseItem,
-			Image: String(row.image_android ?? ''),
-			ImageWidth: safeMetricNumber(row.image_android_width),
-			ImageHeight: safeMetricNumber(row.image_android_height),
-			ImageTextureFormat: String(row.image_android_texture_format ?? ''),
-		});
-		payloadBundle.ios[type].push({
-			...baseItem,
-			Image: String(row.image_ios ?? ''),
-			ImageWidth: safeMetricNumber(row.image_ios_width),
-			ImageHeight: safeMetricNumber(row.image_ios_height),
-			ImageTextureFormat: String(row.image_ios_texture_format ?? ''),
-		});
+		if (platformSet.has('pc')) {
+			payloadBundle.pc[type].push({
+				...baseItem,
+				Image: String(row.image_pc ?? ''),
+				ImageWidth: safeMetricNumber(row.image_pc_width),
+				ImageHeight: safeMetricNumber(row.image_pc_height),
+				ImageTextureFormat: String(row.image_pc_texture_format ?? ''),
+			});
+		}
+		if (platformSet.has('android')) {
+			payloadBundle.android[type].push({
+				...baseItem,
+				Image: String(row.image_android ?? ''),
+				ImageWidth: safeMetricNumber(row.image_android_width),
+				ImageHeight: safeMetricNumber(row.image_android_height),
+				ImageTextureFormat: String(row.image_android_texture_format ?? ''),
+			});
+		}
+		if (platformSet.has('ios')) {
+			payloadBundle.ios[type].push({
+				...baseItem,
+				Image: String(row.image_ios ?? ''),
+				ImageWidth: safeMetricNumber(row.image_ios_width),
+				ImageHeight: safeMetricNumber(row.image_ios_height),
+				ImageTextureFormat: String(row.image_ios_texture_format ?? ''),
+			});
+		}
 	}
 	return payloadBundle;
 }
 
-async function loadPromotionPayloadText(env: Env) {
+async function loadPromotionPlatformPayloadText(env: Env, platform: PromotionPlatform) {
+	const result = await env.STATE_DB.prepare(
+		`SELECT chunk_text
+    FROM promotion_list_platform_cache_chunks
+    WHERE platform = ?
+    ORDER BY chunk_index ASC`
+	)
+		.bind(platform)
+		.all<any>();
+	const chunks = (result.results ?? []).map((row) => String(row.chunk_text ?? ''));
+	return chunks.length > 0 ? chunks.join('') : '';
+}
+
+async function loadLegacyPromotionPayload(env: Env, platform: PromotionPlatform): Promise<PromotionPayload> {
+	const payloadText = await loadLegacyPromotionPayloadText(env);
+	if (!payloadText) return clonePromotionPayload(EMPTY_PROMOTION_PAYLOAD);
+	try {
+		const parsed = JSON.parse(payloadText);
+		if (!parsed || typeof parsed !== 'object') return clonePromotionPayload(EMPTY_PROMOTION_PAYLOAD);
+		return normalizePromotionPayload((parsed as any)[platform]);
+	} catch {
+		return clonePromotionPayload(EMPTY_PROMOTION_PAYLOAD);
+	}
+}
+
+async function loadLegacyPromotionPayloadText(env: Env) {
 	const result = await env.STATE_DB.prepare(
 		`SELECT chunk_text
     FROM promotion_list_cache_chunks
     ORDER BY chunk_index ASC`
 	).all<any>();
 	const chunks = (result.results ?? []).map((row) => String(row.chunk_text ?? ''));
-	return chunks.join('');
+	return chunks.length > 0 ? chunks.join('') : '';
 }
 
 async function loadPromotionPayloadBytes(env: Env) {
-	const row = await env.STATE_DB.prepare(
-		`SELECT payload_total_bytes
-    FROM promotion_list_cache
-    WHERE cache_id = 1`
-	).first<any>();
-	return safeMetricNumber(row?.payload_total_bytes);
+	const usage = await loadPromotionCacheUsage(env);
+	return usage.total.usedBytes;
 }
 
 function splitPromotionPayload(payloadText: string) {
@@ -818,8 +887,8 @@ function splitPromotionPayload(payloadText: string) {
 	return chunks;
 }
 
-function measurePromotionPayloadUsage(payloadText: string) {
-	const emptyUsage = {
+async function loadPromotionCacheUsage(env: Env) {
+	const defaultUsage = {
 		total: buildUsageEntry(0),
 		platforms: {
 			pc: buildUsageEntry(0),
@@ -827,18 +896,51 @@ function measurePromotionPayloadUsage(payloadText: string) {
 			ios: buildUsageEntry(0),
 		},
 	};
+	const result = await env.STATE_DB.prepare(
+		`SELECT
+      platform,
+      payload_bytes
+    FROM promotion_list_platform_cache`
+	).all<any>();
+	if ((result.results ?? []).length === 0) return await measureLegacyPromotionPayloadUsage(env);
+
+	let totalBytes = 0;
+	for (const row of result.results ?? []) {
+		const platform = String(row.platform ?? '') as PromotionPlatform;
+		if (!PROMOTION_PLATFORMS.includes(platform)) continue;
+		const bytes = safeMetricNumber(row.payload_bytes);
+		defaultUsage.platforms[platform] = buildUsageEntry(bytes);
+		totalBytes += bytes;
+	}
+	defaultUsage.total = buildUsageEntry(totalBytes);
+	return defaultUsage;
+}
+
+async function measureLegacyPromotionPayloadUsage(env: Env) {
+	const payloadText = await loadLegacyPromotionPayloadText(env);
+	if (!payloadText) {
+		return {
+			total: buildUsageEntry(0),
+			platforms: {
+				pc: buildUsageEntry(0),
+				android: buildUsageEntry(0),
+				ios: buildUsageEntry(0),
+			},
+		};
+	}
 	try {
 		const parsed = JSON.parse(payloadText);
-		if (!parsed || typeof parsed !== 'object') return emptyUsage;
-		const pcText = JSON.stringify((parsed as any).pc ?? EMPTY_PROMOTION_PAYLOAD);
-		const androidText = JSON.stringify((parsed as any).android ?? EMPTY_PROMOTION_PAYLOAD);
-		const iosText = JSON.stringify((parsed as any).ios ?? EMPTY_PROMOTION_PAYLOAD);
-		const pcBytes = new TextEncoder().encode(pcText).length;
-		const androidBytes = new TextEncoder().encode(androidText).length;
-		const iosBytes = new TextEncoder().encode(iosText).length;
-		const totalBytes = pcBytes + androidBytes + iosBytes;
+		if (!parsed || typeof parsed !== 'object') throw new Error('invalid_legacy_payload');
+		const platformPayloads = {
+			pc: JSON.stringify((parsed as any).pc ?? EMPTY_PROMOTION_PAYLOAD),
+			android: JSON.stringify((parsed as any).android ?? EMPTY_PROMOTION_PAYLOAD),
+			ios: JSON.stringify((parsed as any).ios ?? EMPTY_PROMOTION_PAYLOAD),
+		};
+		const pcBytes = new TextEncoder().encode(platformPayloads.pc).length;
+		const androidBytes = new TextEncoder().encode(platformPayloads.android).length;
+		const iosBytes = new TextEncoder().encode(platformPayloads.ios).length;
 		return {
-			total: buildUsageEntry(totalBytes),
+			total: buildUsageEntry(pcBytes + androidBytes + iosBytes),
 			platforms: {
 				pc: buildUsageEntry(pcBytes),
 				android: buildUsageEntry(androidBytes),
@@ -846,7 +948,14 @@ function measurePromotionPayloadUsage(payloadText: string) {
 			},
 		};
 	} catch {
-		return emptyUsage;
+		return {
+			total: buildUsageEntry(0),
+			platforms: {
+				pc: buildUsageEntry(0),
+				android: buildUsageEntry(0),
+				ios: buildUsageEntry(0),
+			},
+		};
 	}
 }
 
@@ -986,7 +1095,7 @@ export async function savePromotionPlatformImage(
 	)
 		.bind(convertedImageBase64, imageWidth, imageHeight, textureFormat, new Date().toISOString(), id)
 		.run();
-	return await rebuildPromotionListCache(env);
+	return await rebuildPromotionListCache(env, [platform]);
 }
 
 export async function clearPromotionPlatformImages(env: Env, id: string) {
