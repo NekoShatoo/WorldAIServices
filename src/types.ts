@@ -110,6 +110,9 @@ export interface PromotionItem {
 	Description: string;
 	Link: string;
 	Image: string;
+	ImageWidth?: number;
+	ImageHeight?: number;
+	ImageTextureFormat?: string;
 	Type?: PromotionItemType;
 	UpdatedAt?: string;
 	DisplayOrder?: number;

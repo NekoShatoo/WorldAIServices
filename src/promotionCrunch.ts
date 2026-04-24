@@ -4,12 +4,14 @@ export interface PromotionCrunchResult {
 	platform: PromotionPlatform;
 	outputFormat: 'crn' | 'ktx';
 	textureFormat: string;
+	imageWidth: number;
+	imageHeight: number;
 	contentType: string;
 	outputBytes: number;
 	base64: string;
 }
 
-export async function convertPromotionImage(env: Env, platform: PromotionPlatform, sourceImageBase64: string, hasAlpha: boolean) {
+export async function convertPromotionImage(env: Env, platform: PromotionPlatform, sourceImageBase64: string, hasAlpha: boolean, imageWidth: number, imageHeight: number) {
 	if (!env.CRUNCH_API_TOKEN) throw new Error('crunch_api_token_missing');
 	if (!env.CRUNCH_API_URL) throw new Error('crunch_api_url_missing');
 
@@ -43,6 +45,8 @@ export async function convertPromotionImage(env: Env, platform: PromotionPlatfor
 		platform,
 		outputFormat: format.fileformat,
 		textureFormat: format.textureFormat,
+		imageWidth,
+		imageHeight,
 		contentType: response.headers.get('content-type') ?? 'application/octet-stream',
 		outputBytes: buffer.byteLength,
 		base64: arrayBufferToBase64(buffer),

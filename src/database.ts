@@ -578,8 +578,17 @@ export async function updatePromotionItem(
         link = ?,
         image = ?,
         image_pc = ?,
+        image_pc_width = ?,
+        image_pc_height = ?,
+        image_pc_texture_format = ?,
         image_android = ?,
+        image_android_width = ?,
+        image_android_height = ?,
+        image_android_texture_format = ?,
         image_ios = ?,
+        image_ios_width = ?,
+        image_ios_height = ?,
+        image_ios_texture_format = ?,
         updated_at = ?
     WHERE id = ?`
 	)
@@ -591,8 +600,17 @@ export async function updatePromotionItem(
 			payload.Link,
 			payload.Image,
 			rawImageChanged ? '' : currentItem?.image_pc ?? '',
+			rawImageChanged ? 0 : safeMetricNumber(currentItem?.image_pc_width),
+			rawImageChanged ? 0 : safeMetricNumber(currentItem?.image_pc_height),
+			rawImageChanged ? '' : String(currentItem?.image_pc_texture_format ?? ''),
 			rawImageChanged ? '' : currentItem?.image_android ?? '',
+			rawImageChanged ? 0 : safeMetricNumber(currentItem?.image_android_width),
+			rawImageChanged ? 0 : safeMetricNumber(currentItem?.image_android_height),
+			rawImageChanged ? '' : String(currentItem?.image_android_texture_format ?? ''),
 			rawImageChanged ? '' : currentItem?.image_ios ?? '',
+			rawImageChanged ? 0 : safeMetricNumber(currentItem?.image_ios_width),
+			rawImageChanged ? 0 : safeMetricNumber(currentItem?.image_ios_height),
+			rawImageChanged ? '' : String(currentItem?.image_ios_texture_format ?? ''),
 			new Date().toISOString(),
 			id
 		)
@@ -722,8 +740,17 @@ async function buildPromotionPayloadBundleFromItems(env: Env): Promise<Promotion
       description,
       link,
       image_pc,
+      image_pc_width,
+      image_pc_height,
+      image_pc_texture_format,
       image_android,
-      image_ios
+      image_android_width,
+      image_android_height,
+      image_android_texture_format,
+      image_ios,
+      image_ios_width,
+      image_ios_height,
+      image_ios_texture_format
     FROM promotion_list_items
     ORDER BY item_type ASC, display_order ASC, updated_at DESC, id ASC`
 	).all<any>();
@@ -738,9 +765,27 @@ async function buildPromotionPayloadBundleFromItems(env: Env): Promise<Promotion
 		};
 		const type = String(row.item_type ?? '');
 		if (type !== 'Avatar' && type !== 'World') continue;
-		payloadBundle.pc[type].push({ ...baseItem, Image: String(row.image_pc ?? '') });
-		payloadBundle.android[type].push({ ...baseItem, Image: String(row.image_android ?? '') });
-		payloadBundle.ios[type].push({ ...baseItem, Image: String(row.image_ios ?? '') });
+		payloadBundle.pc[type].push({
+			...baseItem,
+			Image: String(row.image_pc ?? ''),
+			ImageWidth: safeMetricNumber(row.image_pc_width),
+			ImageHeight: safeMetricNumber(row.image_pc_height),
+			ImageTextureFormat: String(row.image_pc_texture_format ?? ''),
+		});
+		payloadBundle.android[type].push({
+			...baseItem,
+			Image: String(row.image_android ?? ''),
+			ImageWidth: safeMetricNumber(row.image_android_width),
+			ImageHeight: safeMetricNumber(row.image_android_height),
+			ImageTextureFormat: String(row.image_android_texture_format ?? ''),
+		});
+		payloadBundle.ios[type].push({
+			...baseItem,
+			Image: String(row.image_ios ?? ''),
+			ImageWidth: safeMetricNumber(row.image_ios_width),
+			ImageHeight: safeMetricNumber(row.image_ios_height),
+			ImageTextureFormat: String(row.image_ios_texture_format ?? ''),
+		});
 	}
 	return payloadBundle;
 }
@@ -858,8 +903,17 @@ async function loadPromotionItemRecordById(env: Env, id: string) {
       link,
       image,
       image_pc,
+      image_pc_width,
+      image_pc_height,
+      image_pc_texture_format,
       image_android,
+      image_android_width,
+      image_android_height,
+      image_android_texture_format,
       image_ios,
+      image_ios_width,
+      image_ios_height,
+      image_ios_texture_format,
       updated_at,
       display_order
     FROM promotion_list_items
@@ -891,20 +945,46 @@ export async function getPromotionItemById(env: Env, id: string) {
 	};
 }
 
-export async function savePromotionPlatformImage(env: Env, id: string, platform: PromotionPlatform, convertedImageBase64: string) {
+export async function savePromotionPlatformImage(
+	env: Env,
+	id: string,
+	platform: PromotionPlatform,
+	convertedImageBase64: string,
+	imageWidth: number,
+	imageHeight: number,
+	textureFormat: string
+) {
 	const columnNameByPlatform = {
-		pc: 'image_pc',
-		android: 'image_android',
-		ios: 'image_ios',
+		pc: {
+			image: 'image_pc',
+			width: 'image_pc_width',
+			height: 'image_pc_height',
+			textureFormat: 'image_pc_texture_format',
+		},
+		android: {
+			image: 'image_android',
+			width: 'image_android_width',
+			height: 'image_android_height',
+			textureFormat: 'image_android_texture_format',
+		},
+		ios: {
+			image: 'image_ios',
+			width: 'image_ios_width',
+			height: 'image_ios_height',
+			textureFormat: 'image_ios_texture_format',
+		},
 	};
-	const columnName = columnNameByPlatform[platform];
+	const columnNames = columnNameByPlatform[platform];
 	await env.STATE_DB.prepare(
 		`UPDATE promotion_list_items
-    SET ${columnName} = ?,
+    SET ${columnNames.image} = ?,
+        ${columnNames.width} = ?,
+        ${columnNames.height} = ?,
+        ${columnNames.textureFormat} = ?,
         updated_at = ?
     WHERE id = ?`
 	)
-		.bind(convertedImageBase64, new Date().toISOString(), id)
+		.bind(convertedImageBase64, imageWidth, imageHeight, textureFormat, new Date().toISOString(), id)
 		.run();
 	return await rebuildPromotionListCache(env);
 }
@@ -913,8 +993,17 @@ export async function clearPromotionPlatformImages(env: Env, id: string) {
 	await env.STATE_DB.prepare(
 		`UPDATE promotion_list_items
     SET image_pc = '',
+        image_pc_width = 0,
+        image_pc_height = 0,
+        image_pc_texture_format = '',
         image_android = '',
+        image_android_width = 0,
+        image_android_height = 0,
+        image_android_texture_format = '',
         image_ios = '',
+        image_ios_width = 0,
+        image_ios_height = 0,
+        image_ios_texture_format = '',
         updated_at = ?
     WHERE id = ?`
 	)

@@ -170,7 +170,9 @@ PromotionList 仕様
 - 初期化処理は `bindNavigationEvents()` / `bindAiEvents()` / `bindPromotionEvents()` / `initializePage()` に分割し、後半のイベント登録が一塊で読みにくい状態を解消した
 - `withButtonDisabled()` / `invalidatePanels()` / `refreshPromotionManagePanel()` などの小さな共通関数を追加し、同じ disable/reload/invalidate 手順の重複を減らした
 - PromotionList 公開APIは `GET /PromotionList?p=pc|android|ios` に変更し、要求プラットフォーム向けの変換済み `Image` のみを返すようにした。原画像Base64は公開APIで返さない
+- 公開 `PromotionItem` には `Image` に加えて `ImageWidth` / `ImageHeight` / `ImageTextureFormat` も返すようにした
 - PromotionList 項目テーブルに `image_pc` / `image_android` / `image_ios` を追加し、管理用の原画像 `image` と分離した。原画像更新時は変換済みデータを全消去して未変換状態へ戻す
+- 各プラットフォームの変換結果には幅・高さ・texture format も保存するため、対応メタデータ列を追加した
 - 画像変換は Worker から外部 `crunch` API を順次呼び出す方式に変更した。設定は `pc: DXT1/DXT5 + crn`、`android: ETC1/ETC2 + ktx`、`ios: ETC1/ETC2 + ktx` を使用する
 - 外部変換APIの Bearer token はコードへ直書きせず `CRUNCH_API_TOKEN` 環境変数で参照する。`.dev.vars.example` にも追加した
 - 外部変換APIの URL もコード固定値をやめて `CRUNCH_API_URL` 環境変数から読むように変更した

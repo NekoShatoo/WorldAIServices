@@ -294,22 +294,27 @@ export async function handleManagerApi(request: Request, env: Env, ctx: Executio
 		const id = String(body?.id ?? '').trim();
 		const platform = String(body?.platform ?? '').trim() as PromotionPlatform;
 		const hasAlpha = typeof body?.hasAlpha === 'boolean' ? body.hasAlpha : false;
+		const imageWidth = clampInteger(Number(body?.imageWidth), 0, 32768, 0);
+		const imageHeight = clampInteger(Number(body?.imageHeight), 0, 32768, 0);
 		if (!id) return jsonResponse({ status: 'error', result: 'id を指定してください。' }, 400);
 		if (platform !== 'pc' && platform !== 'android' && platform !== 'ios') return jsonResponse({ status: 'error', result: 'platform は pc/android/ios を指定してください。' }, 400);
+		if (imageWidth <= 0 || imageHeight <= 0) return jsonResponse({ status: 'error', result: 'imageWidth/imageHeight を指定してください。' }, 400);
 
 		const item = await getPromotionItemById(env, id);
 		if (!item) return jsonResponse({ status: 'error', result: 'not_found' }, 404);
 		if (!item.Image.trim()) return jsonResponse({ status: 'error', result: 'image_not_found' }, 400);
 
 		try {
-			const converted = await convertPromotionImage(env, platform, item.Image, hasAlpha);
-			const summary = await savePromotionPlatformImage(env, id, platform, converted.base64);
+			const converted = await convertPromotionImage(env, platform, item.Image, hasAlpha, imageWidth, imageHeight);
+			const summary = await savePromotionPlatformImage(env, id, platform, converted.base64, converted.imageWidth, converted.imageHeight, converted.textureFormat);
 			return jsonResponse({
 				status: 'ok',
 				result: {
 					platform,
 					textureFormat: converted.textureFormat,
 					outputFormat: converted.outputFormat,
+					imageWidth: converted.imageWidth,
+					imageHeight: converted.imageHeight,
 					outputBytes: converted.outputBytes,
 					contentType: converted.contentType,
 					summary,
@@ -354,7 +359,7 @@ export async function handleManagerApi(request: Request, env: Env, ctx: Executio
 				body: [
 					'公開API: GET /PromotionList?p=pc|android|ios',
 					'レスポンスは { Avatar: PromotionItem[], World: PromotionItem[] }',
-					'PromotionItem: Title / Anchor / Description / Link / ID / Image',
+					'PromotionItem: Title / Anchor / Description / Link / ID / Image / ImageWidth / ImageHeight / ImageTextureFormat',
 					'Image は各プラットフォーム向けに変換済みの Base64 データのみを返し、原画像は公開しない',
 					'画像変換は管理画面から pc → android → ios の順で実行する',
 					'公開APIは都度変換せず、管理画面更新時に再生成したキャッシュJSONを返す',

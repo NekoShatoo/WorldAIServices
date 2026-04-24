@@ -1002,6 +1002,8 @@ export const MANAGER_APP_SCRIPT = `
               id: item.ID,
               platform,
               hasAlpha: state.currentConvertHasAlpha,
+              imageWidth: meta.width,
+              imageHeight: meta.height,
             }),
             loadingMessage: platform + " 向け画像を変換しています...",
           })).data;
