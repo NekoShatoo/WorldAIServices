@@ -22,7 +22,15 @@ export const MANAGER_APP_SCRIPT = `
       loadedPanels: {},
       dayChart: null,
       langChart: null,
-      promotionUsage: { usedBytes: 0, maxBytes: MAX_PROMOTION_BYTES, usedPercent: 0 },
+      promotionUsage: {
+        maxBytes: MAX_PROMOTION_BYTES,
+        total: { usedBytes: 0, usedPercent: 0 },
+        platforms: {
+          pc: { usedBytes: 0, usedPercent: 0 },
+          android: { usedBytes: 0, usedPercent: 0 },
+          ios: { usedBytes: 0, usedPercent: 0 },
+        },
+      },
       promotionItems: [],
       promotionModalMode: PROMOTION_MODAL_MODE.create,
       promotionEditingId: "",
@@ -33,6 +41,7 @@ export const MANAGER_APP_SCRIPT = `
       promotionDragAutoScrollSpeed: 0,
       currentConvertItemId: "",
       currentPromotionDetail: null,
+      currentConvertHasAlpha: false,
       convertModalBusy: false,
     };
     if (!state.token) location.href = "/mgr";
@@ -72,8 +81,13 @@ export const MANAGER_APP_SCRIPT = `
         [PANEL_KEYS.docsPromotion]: document.getElementById("panel-docs-promotion"),
       },
       refreshPromotionUsageButton: document.getElementById("refreshPromotionUsageButton"),
-      promotionUsageBar: document.getElementById("promotionUsageBar"),
-      promotionUsageText: document.getElementById("promotionUsageText"),
+      promotionUsageBarPc: document.getElementById("promotionUsageBarPc"),
+      promotionUsageBarAndroid: document.getElementById("promotionUsageBarAndroid"),
+      promotionUsageBarIos: document.getElementById("promotionUsageBarIos"),
+      promotionUsageTextPc: document.getElementById("promotionUsageTextPc"),
+      promotionUsageTextAndroid: document.getElementById("promotionUsageTextAndroid"),
+      promotionUsageTextIos: document.getElementById("promotionUsageTextIos"),
+      promotionUsageTextTotal: document.getElementById("promotionUsageTextTotal"),
       promotionLoadingText: document.getElementById("promotionLoadingText"),
       promotionItemsList: document.getElementById("promotionItemsList"),
       promotionCreateOpenButton: document.getElementById("promotionCreateOpenButton"),
@@ -120,7 +134,10 @@ export const MANAGER_APP_SCRIPT = `
       promotionConvertModalMeta: document.getElementById("promotionConvertModalMeta"),
       promotionConvertModalCloseButton: document.getElementById("promotionConvertModalCloseButton"),
       promotionConvertResizeButton: document.getElementById("promotionConvertResizeButton"),
+      promotionConvertClearButton: document.getElementById("promotionConvertClearButton"),
       promotionConvertRunButton: document.getElementById("promotionConvertRunButton"),
+      promotionConvertHasAlphaInput: document.getElementById("promotionConvertHasAlphaInput"),
+      promotionConvertEncoderSummary: document.getElementById("promotionConvertEncoderSummary"),
       promotionConvertLog: document.getElementById("promotionConvertLog"),
       globalLoadingOverlay: document.getElementById("globalLoadingOverlay"),
       globalLoadingText: document.getElementById("globalLoadingText"),
@@ -270,6 +287,18 @@ export const MANAGER_APP_SCRIPT = `
     function formatImageMeta(meta) {
       if (!meta) return "画像サイズ: -";
       return "画像サイズ: " + meta.width + " x " + meta.height + " / " + (meta.hasAlpha ? "透明あり" : "透明なし");
+    }
+
+    function getPlatformEncoderSummaryText(hasAlpha) {
+      return [
+        "PC: " + (hasAlpha ? "DXT5Crunched (crn / DXT5)" : "DXT1Crunched (crn / DXT1)"),
+        "Android: " + (hasAlpha ? "ETC2_RGBA8Crunched 相当 (ktx / ETC2)" : "ETC_RGB4Crunched (ktx / ETC1)"),
+        "iOS: " + (hasAlpha ? "ETC2_RGBA8Crunched (ktx / ETC2)" : "ETC_RGB4Crunched (ktx / ETC1)"),
+      ].join("\\n");
+    }
+
+    function refreshConvertEncoderSummary() {
+      ui.promotionConvertEncoderSummary.textContent = getPlatformEncoderSummaryText(state.currentConvertHasAlpha);
     }
 
     function renderMultipleOf4Status(meta) {
@@ -472,9 +501,15 @@ export const MANAGER_APP_SCRIPT = `
     }
 
     function renderPromotionUsage() {
-      ui.promotionUsageText.textContent = (state.promotionUsage.usedBytes / (1024 * 1024)).toFixed(2) + "MB / " + (state.promotionUsage.maxBytes / (1024 * 1024)).toFixed(0) + "MB";
-      ui.promotionUsageBar.style.width = Math.min(100, state.promotionUsage.usedPercent) + "%";
-      ui.kpiPromotionUsage.textContent = state.promotionUsage.usedPercent.toFixed(2) + "%";
+      const maxBytesText = (state.promotionUsage.maxBytes / (1024 * 1024)).toFixed(0) + "MB";
+      ui.promotionUsageTextPc.textContent = (state.promotionUsage.platforms.pc.usedBytes / (1024 * 1024)).toFixed(2) + "MB / " + maxBytesText;
+      ui.promotionUsageTextAndroid.textContent = (state.promotionUsage.platforms.android.usedBytes / (1024 * 1024)).toFixed(2) + "MB / " + maxBytesText;
+      ui.promotionUsageTextIos.textContent = (state.promotionUsage.platforms.ios.usedBytes / (1024 * 1024)).toFixed(2) + "MB / " + maxBytesText;
+      ui.promotionUsageBarPc.style.width = Math.min(100, state.promotionUsage.platforms.pc.usedPercent) + "%";
+      ui.promotionUsageBarAndroid.style.width = Math.min(100, state.promotionUsage.platforms.android.usedPercent) + "%";
+      ui.promotionUsageBarIos.style.width = Math.min(100, state.promotionUsage.platforms.ios.usedPercent) + "%";
+      ui.promotionUsageTextTotal.textContent = "合計: " + (state.promotionUsage.total.usedBytes / (1024 * 1024)).toFixed(2) + "MB";
+      ui.kpiPromotionUsage.textContent = state.promotionUsage.total.usedPercent.toFixed(2) + "%";
     }
 
     async function refreshPromotionManagePanel() {
@@ -884,9 +919,12 @@ export const MANAGER_APP_SCRIPT = `
       state.convertModalBusy = busy;
       ui.promotionConvertRunButton.disabled = busy;
       ui.promotionConvertResizeButton.disabled = busy;
+      ui.promotionConvertClearButton.disabled = busy;
       ui.promotionConvertModalCloseButton.disabled = busy;
+      ui.promotionConvertHasAlphaInput.disabled = busy;
       ui.promotionConvertRunButton.classList.toggle("opacity-70", busy);
       ui.promotionConvertResizeButton.classList.toggle("opacity-70", busy);
+      ui.promotionConvertClearButton.classList.toggle("opacity-70", busy);
     }
 
     async function openPromotionConvertModal(id) {
@@ -895,13 +933,17 @@ export const MANAGER_APP_SCRIPT = `
       state.currentConvertItemId = id;
       ui.promotionConvertModalTitle.textContent = "画像変換 / " + (item.Title || item.ID);
       const meta = await getImageMetaFromBase64(item.Image);
+      state.currentConvertHasAlpha = !!meta?.hasAlpha;
+      ui.promotionConvertHasAlphaInput.checked = state.currentConvertHasAlpha;
+      refreshConvertEncoderSummary();
       ui.promotionConvertModalMeta.textContent = formatImageMeta(meta);
       ui.promotionConvertLog.textContent = "";
       appendConvertLog("対象ID: " + item.ID);
       appendConvertLog("現在状態: " + (item.IsImageConverted ? "変換済み" : "未変換"));
       if (meta) {
         appendConvertLog("画像サイズ: " + meta.width + " x " + meta.height);
-        appendConvertLog("アルファ: " + (meta.hasAlpha ? "あり" : "なし"));
+        appendConvertLog("自動検出アルファ: " + (meta.hasAlpha ? "あり" : "なし"));
+        appendConvertLog("変換設定アルファ: " + (state.currentConvertHasAlpha ? "あり" : "なし"));
         if (!isImageMetaConvertible(meta)) appendConvertLog("注意: 画像サイズは縦横とも 4 の倍数である必要があります。");
       }
       ui.promotionConvertModal.classList.remove("hidden");
@@ -913,6 +955,7 @@ export const MANAGER_APP_SCRIPT = `
       ui.promotionConvertModal.classList.add("hidden");
       state.currentConvertItemId = "";
       state.currentPromotionDetail = null;
+      state.currentConvertHasAlpha = false;
       ui.promotionConvertLog.textContent = "";
     }
 
@@ -958,7 +1001,7 @@ export const MANAGER_APP_SCRIPT = `
             body: JSON.stringify({
               id: item.ID,
               platform,
-              hasAlpha: meta.hasAlpha,
+              hasAlpha: state.currentConvertHasAlpha,
             }),
             loadingMessage: platform + " 向け画像を変換しています...",
           })).data;
@@ -972,6 +1015,30 @@ export const MANAGER_APP_SCRIPT = `
         await loadPromotionUsage();
         invalidatePanels(PANEL_KEYS.dashboard);
         appendConvertLog("全プラットフォームの変換が完了しました。閉じることができます。");
+      } finally {
+        setConvertModalBusy(false);
+      }
+    }
+
+    async function clearCurrentPromotionConvertedData() {
+      const item = state.currentPromotionDetail;
+      if (!item) return;
+      if (!confirm("現在の項目の変換済みデータをすべて清空しますか？")) return;
+      setConvertModalBusy(true);
+      try {
+        appendConvertLog("変換済みデータを清空しています...");
+        const result = (await callApi("/promotion/items/clear-converted", {
+          method: "POST",
+          body: JSON.stringify({ id: item.ID }),
+          loadingMessage: "変換済みデータを清空しています...",
+        })).data;
+        if (result.status !== "ok") {
+          appendConvertLog("清空失敗: " + result.result);
+          return;
+        }
+        await loadPromotionItems();
+        state.currentPromotionDetail = await loadPromotionItemDetail(item.ID);
+        appendConvertLog("清空完了: pc / android / ios の変換データを削除しました。");
       } finally {
         setConvertModalBusy(false);
       }
@@ -1149,7 +1216,13 @@ export const MANAGER_APP_SCRIPT = `
       ui.promotionConvertModal.addEventListener("click", (event) => {
         if (event.target === ui.promotionConvertModal) closePromotionConvertModal();
       });
+      ui.promotionConvertHasAlphaInput.addEventListener("change", () => {
+        state.currentConvertHasAlpha = !!ui.promotionConvertHasAlphaInput.checked;
+        refreshConvertEncoderSummary();
+        appendConvertLog("変換設定アルファを " + (state.currentConvertHasAlpha ? "あり" : "なし") + " に変更しました。");
+      });
       ui.promotionConvertResizeButton.addEventListener("click", resizeCurrentConvertItemToMultipleOf4AndSave);
+      ui.promotionConvertClearButton.addEventListener("click", clearCurrentPromotionConvertedData);
       ui.promotionConvertRunButton.addEventListener("click", runPromotionConversion);
     }
 

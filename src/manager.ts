@@ -14,6 +14,7 @@ import {
 	reorderPromotionItems,
 	getPromotionItemById,
 	savePromotionPlatformImage,
+	clearPromotionPlatformImages,
 } from './database';
 import { TRANSLATION_PROMPT_VERSION } from './constants';
 import { jsonResponse, clampInteger, countCharacters } from './utils';
@@ -318,6 +319,16 @@ export async function handleManagerApi(request: Request, env: Env, ctx: Executio
 			const message = error instanceof Error ? error.message : String(error);
 			return jsonResponse({ status: 'error', result: message }, 502);
 		}
+	}
+
+	if (path === '/promotion/items/clear-converted' && request.method === 'POST') {
+		const body = await readJsonBody(request);
+		const id = String(body?.id ?? '').trim();
+		if (!id) return jsonResponse({ status: 'error', result: 'id を指定してください。' }, 400);
+		const item = await getPromotionItemById(env, id);
+		if (!item) return jsonResponse({ status: 'error', result: 'not_found' }, 404);
+		const summary = await clearPromotionPlatformImages(env, id);
+		return jsonResponse({ status: 'ok', result: summary });
 	}
 
 	if (path === '/docs/ai' && request.method === 'GET') {

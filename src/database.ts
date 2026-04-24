@@ -674,11 +674,12 @@ export async function getPromotionListPayload(env: Env, platform: PromotionPlatf
 }
 
 export async function getPromotionListUsage(env: Env) {
-	const bytes = await loadPromotionPayloadBytes(env);
+	const payloadText = await loadPromotionPayloadText(env);
+	const usage = measurePromotionPayloadUsage(payloadText);
 	return {
-		usedBytes: bytes,
 		maxBytes: PROMOTION_LIST_MAX_BYTES,
-		usedPercent: Math.min(100, Number(((bytes / PROMOTION_LIST_MAX_BYTES) * 100).toFixed(2))),
+		total: usage.total,
+		platforms: usage.platforms,
 	};
 }
 
@@ -770,6 +771,45 @@ function splitPromotionPayload(payloadText: string) {
 		chunks.push(payloadText.slice(index, index + PROMOTION_LIST_CHUNK_SIZE));
 	}
 	return chunks;
+}
+
+function measurePromotionPayloadUsage(payloadText: string) {
+	const emptyUsage = {
+		total: buildUsageEntry(0),
+		platforms: {
+			pc: buildUsageEntry(0),
+			android: buildUsageEntry(0),
+			ios: buildUsageEntry(0),
+		},
+	};
+	try {
+		const parsed = JSON.parse(payloadText);
+		if (!parsed || typeof parsed !== 'object') return emptyUsage;
+		const pcText = JSON.stringify((parsed as any).pc ?? EMPTY_PROMOTION_PAYLOAD);
+		const androidText = JSON.stringify((parsed as any).android ?? EMPTY_PROMOTION_PAYLOAD);
+		const iosText = JSON.stringify((parsed as any).ios ?? EMPTY_PROMOTION_PAYLOAD);
+		const pcBytes = new TextEncoder().encode(pcText).length;
+		const androidBytes = new TextEncoder().encode(androidText).length;
+		const iosBytes = new TextEncoder().encode(iosText).length;
+		const totalBytes = pcBytes + androidBytes + iosBytes;
+		return {
+			total: buildUsageEntry(totalBytes),
+			platforms: {
+				pc: buildUsageEntry(pcBytes),
+				android: buildUsageEntry(androidBytes),
+				ios: buildUsageEntry(iosBytes),
+			},
+		};
+	} catch {
+		return emptyUsage;
+	}
+}
+
+function buildUsageEntry(bytes: number) {
+	return {
+		usedBytes: bytes,
+		usedPercent: Math.min(100, Number(((bytes / PROMOTION_LIST_MAX_BYTES) * 100).toFixed(2))),
+	};
 }
 
 function normalizePromotionPayload(value: any): PromotionPayload {
@@ -865,6 +905,20 @@ export async function savePromotionPlatformImage(env: Env, id: string, platform:
     WHERE id = ?`
 	)
 		.bind(convertedImageBase64, new Date().toISOString(), id)
+		.run();
+	return await rebuildPromotionListCache(env);
+}
+
+export async function clearPromotionPlatformImages(env: Env, id: string) {
+	await env.STATE_DB.prepare(
+		`UPDATE promotion_list_items
+    SET image_pc = '',
+        image_android = '',
+        image_ios = '',
+        updated_at = ?
+    WHERE id = ?`
+	)
+		.bind(new Date().toISOString(), id)
 		.run();
 	return await rebuildPromotionListCache(env);
 }

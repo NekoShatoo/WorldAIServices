@@ -93,8 +93,21 @@ export function buildManagerAppPageHtml() {
         <p id="promotionSortHint" class="hidden text-xs text-[color:var(--mgr-muted)]">並び替え編集中です。項目をドラッグして順番を調整し、最後に保存してください。</p>
         <div class="space-y-2">
           <div class="flex items-center justify-between"><p class="text-sm font-semibold">API 使用率（上限 100MB）</p><button id="refreshPromotionUsageButton" class="px-3 py-1 rounded-lg bg-violet-100 text-violet-700 text-sm font-semibold">再計算</button></div>
-          <div class="w-full h-4 bg-violet-100 rounded-full overflow-hidden"><div id="promotionUsageBar" class="h-full bg-violet-500" style="width: 0%"></div></div>
-          <p id="promotionUsageText" class="text-xs text-[color:var(--mgr-muted)]">0 / 100MB</p>
+          <div class="space-y-2">
+            <div>
+              <div class="flex items-center justify-between text-xs text-[color:var(--mgr-muted)]"><span>PC</span><span id="promotionUsageTextPc">0 / 100MB</span></div>
+              <div class="w-full h-4 bg-violet-100 rounded-full overflow-hidden"><div id="promotionUsageBarPc" class="h-full bg-sky-500" style="width: 0%"></div></div>
+            </div>
+            <div>
+              <div class="flex items-center justify-between text-xs text-[color:var(--mgr-muted)]"><span>Android</span><span id="promotionUsageTextAndroid">0 / 100MB</span></div>
+              <div class="w-full h-4 bg-violet-100 rounded-full overflow-hidden"><div id="promotionUsageBarAndroid" class="h-full bg-emerald-500" style="width: 0%"></div></div>
+            </div>
+            <div>
+              <div class="flex items-center justify-between text-xs text-[color:var(--mgr-muted)]"><span>iOS</span><span id="promotionUsageTextIos">0 / 100MB</span></div>
+              <div class="w-full h-4 bg-violet-100 rounded-full overflow-hidden"><div id="promotionUsageBarIos" class="h-full bg-amber-500" style="width: 0%"></div></div>
+            </div>
+          </div>
+          <p id="promotionUsageTextTotal" class="text-xs text-[color:var(--mgr-muted)]">合計: 0 / 300MB 相当</p>
         </div>
         <div class="card p-3">
           <div class="flex items-center justify-between gap-2 mb-2">
@@ -195,7 +208,18 @@ export function buildManagerAppPageHtml() {
       </div>
       <div class="flex flex-wrap gap-2">
         <button id="promotionConvertResizeButton" class="px-4 py-2 rounded-xl bg-violet-100 text-violet-700 font-semibold">4の倍数へ拡大して保存</button>
+        <button id="promotionConvertClearButton" class="px-4 py-2 rounded-xl bg-red-100 text-red-700 font-semibold">変換データを清空</button>
         <button id="promotionConvertRunButton" class="px-4 py-2 rounded-xl bg-violet-600 text-white font-semibold hover:bg-violet-500">変換開始</button>
+      </div>
+      <div class="grid md:grid-cols-2 gap-3">
+        <label class="text-sm flex items-center gap-2">
+          <input id="promotionConvertHasAlphaInput" type="checkbox" />
+          <span>透明ありとして変換する</span>
+        </label>
+        <div class="rounded-xl border border-[color:var(--mgr-border)] bg-white p-3">
+          <p class="text-sm font-semibold mb-2">使用エンコーダー</p>
+          <div id="promotionConvertEncoderSummary" class="text-xs whitespace-pre-wrap text-[color:var(--mgr-text)]"></div>
+        </div>
       </div>
       <div class="rounded-xl border border-[color:var(--mgr-border)] bg-violet-50 p-3 space-y-2">
         <p class="text-sm font-semibold">変換ログ</p>
