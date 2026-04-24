@@ -115,6 +115,7 @@ export interface PromotionItem {
 	DisplayOrder?: number;
 	ConvertedPlatforms?: PromotionPlatform[];
 	IsImageConverted?: boolean;
+	HasImage?: boolean;
 }
 
 export interface PromotionPayload {

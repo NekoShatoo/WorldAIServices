@@ -31,8 +31,8 @@ export const MANAGER_APP_SCRIPT = `
       promotionSortDraftIds: [],
       promotionDragAutoScrollRaf: 0,
       promotionDragAutoScrollSpeed: 0,
-      promotionThumbRenderToken: 0,
       currentConvertItemId: "",
+      currentPromotionDetail: null,
       convertModalBusy: false,
     };
     if (!state.token) location.href = "/mgr";
@@ -207,6 +207,15 @@ export const MANAGER_APP_SCRIPT = `
 
     function getPromotionItemById(id) {
       return state.promotionItems.find((item) => item.ID === id) || null;
+    }
+
+    async function loadPromotionItemDetail(id) {
+      const result = (await callApi("/promotion/items/detail?id=" + encodeURIComponent(id), {
+        loadingMessage: "項目詳細を読み込んでいます...",
+      })).data;
+      if (result.status !== "ok") return null;
+      state.currentPromotionDetail = result.result;
+      return result.result;
     }
 
     function getPromotionItemDataUrl(item) {
@@ -498,13 +507,8 @@ export const MANAGER_APP_SCRIPT = `
       ui.promotionSubmitProgressBox.classList.add("hidden");
     }
 
-    function buildPromotionThumbUi(imageDataUrl, itemId) {
-      if (!imageDataUrl) return '<div class="w-14 h-14 rounded-lg border border-[color:var(--mgr-border)] bg-violet-50 text-[10px] text-[color:var(--mgr-muted)] flex items-center justify-center flex-shrink-0">NoImg</div>';
-      return '<div class="relative w-14 h-14 rounded-lg border border-[color:var(--mgr-border)] overflow-hidden bg-violet-50 flex-shrink-0" data-thumb-id="' + encodeURIComponent(itemId) + '"><div class="absolute inset-0 flex items-center justify-center" data-thumb-spinner><span class="inline-block w-5 h-5 border-2 border-violet-300 border-t-violet-600 rounded-full animate-spin"></span></div><img class="hidden w-full h-full object-cover" data-thumb-img alt="thumb" /></div>';
-    }
-
     function buildPromotionConvertButton(item) {
-      if (!String(item.Image || "").trim()) return "";
+      if (!item.HasImage) return "";
       const converted = !!item.IsImageConverted;
       const baseClass = converted
         ? "px-2 py-1 rounded bg-emerald-100 text-emerald-700 text-xs"
@@ -513,13 +517,11 @@ export const MANAGER_APP_SCRIPT = `
     }
 
     function buildPromotionItemCard(item) {
-      const imageDataUrl = getPromotionItemDataUrl(item);
       const dragAttrs = state.promotionSortEditMode ? ' draggable="true" data-promotion-drag-id="' + item.ID + '"' : "";
       const moveUi = state.promotionSortEditMode ? '<span class="text-xs px-2 py-1 rounded bg-violet-100 text-violet-700 cursor-grab">ドラッグ</span>' : "";
-      const previewUi = imageDataUrl ? '<button class="px-2 py-1 rounded bg-violet-100 text-violet-700 text-xs" data-promotion-preview="' + item.ID + '">画像</button>' : "";
+      const previewUi = item.HasImage ? '<span class="px-2 py-1 rounded bg-violet-100 text-violet-700 text-xs">画像あり</span>' : '<span class="px-2 py-1 rounded bg-slate-100 text-slate-500 text-xs">画像なし</span>';
       const convertUi = buildPromotionConvertButton(item);
-      const thumbUi = buildPromotionThumbUi(imageDataUrl, item.ID);
-      return '<div class="card p-3" ' + dragAttrs + '><div class="flex items-center justify-between gap-2"><div class="flex items-center gap-2">' + moveUi + thumbUi + '<div><p class="font-semibold">' + item.Type + ' / ' + (item.Title || "(no title)") + '</p><p class="text-xs text-[color:var(--mgr-muted)]">ID: ' + item.ID + '</p></div></div><div class="flex gap-2">' + previewUi + convertUi + '<button class="px-2 py-1 rounded bg-violet-100 text-violet-700 text-xs" data-promotion-edit="' + item.ID + '">編集</button><button class="px-2 py-1 rounded bg-red-100 text-red-700 text-xs" data-promotion-delete="' + item.ID + '">削除</button></div></div><p class="text-xs mt-2 text-[color:var(--mgr-muted)]">' + (item.Description || "(no description)") + '</p></div>';
+      return '<div class="card p-3" ' + dragAttrs + '><div class="flex items-center justify-between gap-2"><div class="flex items-center gap-2">' + moveUi + '<div><p class="font-semibold">' + item.Type + ' / ' + (item.Title || "(no title)") + '</p><p class="text-xs text-[color:var(--mgr-muted)]">ID: ' + item.ID + '</p></div></div><div class="flex gap-2">' + previewUi + convertUi + '<button class="px-2 py-1 rounded bg-violet-100 text-violet-700 text-xs" data-promotion-edit="' + item.ID + '">編集</button><button class="px-2 py-1 rounded bg-red-100 text-red-700 text-xs" data-promotion-delete="' + item.ID + '">削除</button></div></div><p class="text-xs mt-2 text-[color:var(--mgr-muted)]">' + (item.Description || "(no description)") + '</p></div>';
     }
 
     function getPromotionSourceItems() {
@@ -535,48 +537,7 @@ export const MANAGER_APP_SCRIPT = `
       }
       const sourceItems = getPromotionSourceItems();
       ui.promotionItemsList.innerHTML = sourceItems.map((item) => buildPromotionItemCard(item)).join("");
-      state.promotionThumbRenderToken += 1;
-      hydratePromotionListThumbnails(sourceItems, state.promotionThumbRenderToken);
       if (state.promotionSortEditMode) bindPromotionSortDragEvents();
-    }
-
-    function waitImageReady(image) {
-      if (image.decode) return image.decode().catch(() => null);
-      return new Promise((resolve) => {
-        if (image.complete) {
-          resolve(null);
-          return;
-        }
-        image.onload = () => resolve(null);
-        image.onerror = () => resolve(null);
-      });
-    }
-
-    async function hydratePromotionListThumbnails(items, renderToken) {
-      const imageMap = {};
-      items.forEach((item) => {
-        const source = getPromotionItemDataUrl(item);
-        if (source) imageMap[item.ID] = source;
-      });
-      const hosts = Array.from(ui.promotionItemsList.querySelectorAll("[data-thumb-id]"));
-      for (const host of hosts) {
-        if (renderToken !== state.promotionThumbRenderToken) return;
-        const encodedId = String(host.getAttribute("data-thumb-id") || "");
-        const id = decodeURIComponent(encodedId);
-        const source = imageMap[id];
-        if (!source) continue;
-        const spinner = host.querySelector("[data-thumb-spinner]");
-        const target = host.querySelector("[data-thumb-img]");
-        const loader = new Image();
-        loader.decoding = "async";
-        loader.src = source;
-        await waitImageReady(loader);
-        if (renderToken !== state.promotionThumbRenderToken) return;
-        target.src = source;
-        target.classList.remove("hidden");
-        if (spinner) spinner.classList.add("hidden");
-        await new Promise((resolve) => setTimeout(resolve, 24));
-      }
     }
 
     function bindPromotionSortDragEvents() {
@@ -832,6 +793,7 @@ export const MANAGER_APP_SCRIPT = `
     function closePromotionModal() {
       ui.promotionModal.classList.add("hidden");
       resetPromotionForm();
+      state.currentPromotionDetail = null;
     }
 
     function buildPromotionSubmitRequest(payload, prediction) {
@@ -909,7 +871,7 @@ export const MANAGER_APP_SCRIPT = `
       })).data;
       if (result.status !== "ok") throw new Error("promotion_item_save_failed");
       await refreshPromotionManagePanel();
-      return getPromotionItemById(item.ID);
+      return await loadPromotionItemDetail(item.ID);
     }
 
     function appendConvertLog(message) {
@@ -928,7 +890,7 @@ export const MANAGER_APP_SCRIPT = `
     }
 
     async function openPromotionConvertModal(id) {
-      const item = getPromotionItemById(id);
+      const item = await loadPromotionItemDetail(id);
       if (!item) return;
       state.currentConvertItemId = id;
       ui.promotionConvertModalTitle.textContent = "画像変換 / " + (item.Title || item.ID);
@@ -950,11 +912,12 @@ export const MANAGER_APP_SCRIPT = `
       if (state.convertModalBusy) return;
       ui.promotionConvertModal.classList.add("hidden");
       state.currentConvertItemId = "";
+      state.currentPromotionDetail = null;
       ui.promotionConvertLog.textContent = "";
     }
 
     async function resizeCurrentConvertItemToMultipleOf4AndSave() {
-      const item = getPromotionItemById(state.currentConvertItemId);
+      const item = state.currentPromotionDetail;
       if (!item || !item.Image) return;
       const meta = await getImageMetaFromBase64(item.Image);
       if (!meta) return;
@@ -977,7 +940,7 @@ export const MANAGER_APP_SCRIPT = `
     }
 
     async function runPromotionConversion() {
-      const item = getPromotionItemById(state.currentConvertItemId);
+      const item = state.currentPromotionDetail;
       if (!item || !item.Image) return;
       const meta = await getImageMetaFromBase64(item.Image);
       if (!isImageMetaConvertible(meta)) {
@@ -1047,7 +1010,7 @@ export const MANAGER_APP_SCRIPT = `
 
       const editId = actionButton.getAttribute("data-promotion-edit");
       if (editId) {
-        const item = getPromotionItemById(editId);
+        const item = await loadPromotionItemDetail(editId);
         if (item) await openPromotionModal(PROMOTION_MODAL_MODE.edit, item);
         return;
       }

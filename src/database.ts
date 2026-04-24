@@ -462,7 +462,7 @@ export async function listPromotionItems(env: Env, itemType?: PromotionItemType)
       anchor,
       description,
       link,
-      image,
+      LENGTH(image) AS image_length,
       LENGTH(image_pc) AS image_pc_length,
       LENGTH(image_android) AS image_android_length,
       LENGTH(image_ios) AS image_ios_length,
@@ -482,7 +482,7 @@ export async function listPromotionItems(env: Env, itemType?: PromotionItemType)
       anchor,
       description,
       link,
-      image,
+      LENGTH(image) AS image_length,
       LENGTH(image_pc) AS image_pc_length,
       LENGTH(image_android) AS image_android_length,
       LENGTH(image_ios) AS image_ios_length,
@@ -498,11 +498,12 @@ export async function listPromotionItems(env: Env, itemType?: PromotionItemType)
 		Anchor: String(row.anchor ?? ''),
 		Description: String(row.description ?? ''),
 		Link: String(row.link ?? ''),
-		Image: String(row.image ?? ''),
+		Image: '',
 		UpdatedAt: String(row.updated_at ?? ''),
 		DisplayOrder: safeMetricNumber(row.display_order),
 		ConvertedPlatforms: buildConvertedPlatformsFromRow(row),
 		IsImageConverted: hasAllConvertedPlatforms(row),
+		HasImage: safeMetricNumber(row.image_length) > 0,
 	}));
 }
 

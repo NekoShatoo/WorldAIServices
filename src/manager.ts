@@ -190,6 +190,14 @@ export async function handleManagerApi(request: Request, env: Env, ctx: Executio
 		return jsonResponse({ status: 'ok', result: await listPromotionItems(env, type || undefined) });
 	}
 
+	if (path === '/promotion/items/detail' && request.method === 'GET') {
+		const id = String(url.searchParams.get('id') ?? '').trim();
+		if (!id) return jsonResponse({ status: 'error', result: 'id を指定してください。' }, 400);
+		const item = await getPromotionItemById(env, id);
+		if (!item) return jsonResponse({ status: 'error', result: 'not_found' }, 404);
+		return jsonResponse({ status: 'ok', result: item });
+	}
+
 	if (path === '/promotion/items' && request.method === 'POST') {
 		const body = await readJsonBody(request);
 		const itemType = String(body?.type ?? '') as PromotionItemType;
