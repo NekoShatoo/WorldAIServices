@@ -12,14 +12,15 @@ import {
 	updatePromotionItem,
 	movePromotionItem,
 	reorderPromotionItems,
-	loadPromotionApiConfig,
-	updatePromotionApiConfig,
+	getPromotionItemById,
+	savePromotionPlatformImage,
 } from './database';
 import { TRANSLATION_PROMPT_VERSION } from './constants';
 import { jsonResponse, clampInteger, countCharacters } from './utils';
 import { requestAiTranslation } from './ai';
 import { executeTranslation } from './translation';
-import { Env, PromotionItemType } from './types';
+import { convertPromotionImage } from './promotionCrunch';
+import { Env, PromotionItemType, PromotionPlatform } from './types';
 
 const SESSION_TTL_SECONDS = 60 * 60 * 12;
 const TOKEN_VERSION = 'v1';
@@ -183,17 +184,6 @@ export async function handleManagerApi(request: Request, env: Env, ctx: Executio
 		return jsonResponse({ status: 'ok', result: await getPromotionListUsage(env) });
 	}
 
-	if (path === '/promotion/api-config' && request.method === 'GET') {
-		return jsonResponse({ status: 'ok', result: await loadPromotionApiConfig(env) });
-	}
-
-	if (path === '/promotion/api-config' && request.method === 'POST') {
-		const body = await readJsonBody(request);
-		const includeImageInResponse = typeof body?.includeImageInResponse === 'boolean' ? body.includeImageInResponse : true;
-		const summary = await updatePromotionApiConfig(env, includeImageInResponse);
-		return jsonResponse({ status: 'ok', result: { includeImageInResponse, summary } });
-	}
-
 	if (path === '/promotion/items' && request.method === 'GET') {
 		const type = String(url.searchParams.get('type') ?? '') as PromotionItemType;
 		if (type && type !== 'Avatar' && type !== 'World') return jsonResponse({ status: 'error', result: 'type は Avatar または World を指定してください。' }, 400);
@@ -290,6 +280,38 @@ export async function handleManagerApi(request: Request, env: Env, ctx: Executio
 		return jsonResponse({ status: 'ok', result: reordered.summary });
 	}
 
+	if (path === '/promotion/items/convert' && request.method === 'POST') {
+		const body = await readJsonBody(request);
+		const id = String(body?.id ?? '').trim();
+		const platform = String(body?.platform ?? '').trim() as PromotionPlatform;
+		const hasAlpha = typeof body?.hasAlpha === 'boolean' ? body.hasAlpha : false;
+		if (!id) return jsonResponse({ status: 'error', result: 'id を指定してください。' }, 400);
+		if (platform !== 'pc' && platform !== 'android' && platform !== 'ios') return jsonResponse({ status: 'error', result: 'platform は pc/android/ios を指定してください。' }, 400);
+
+		const item = await getPromotionItemById(env, id);
+		if (!item) return jsonResponse({ status: 'error', result: 'not_found' }, 404);
+		if (!item.Image.trim()) return jsonResponse({ status: 'error', result: 'image_not_found' }, 400);
+
+		try {
+			const converted = await convertPromotionImage(env, platform, item.Image, hasAlpha);
+			const summary = await savePromotionPlatformImage(env, id, platform, converted.base64);
+			return jsonResponse({
+				status: 'ok',
+				result: {
+					platform,
+					textureFormat: converted.textureFormat,
+					outputFormat: converted.outputFormat,
+					outputBytes: converted.outputBytes,
+					contentType: converted.contentType,
+					summary,
+				},
+			});
+		} catch (error) {
+			const message = error instanceof Error ? error.message : String(error);
+			return jsonResponse({ status: 'error', result: message }, 502);
+		}
+	}
+
 	if (path === '/docs/ai' && request.method === 'GET') {
 		return jsonResponse({
 			status: 'ok',
@@ -311,11 +333,12 @@ export async function handleManagerApi(request: Request, env: Env, ctx: Executio
 			result: {
 				title: 'PromotionList API 仕様',
 				body: [
-					'公開API: GET /PromotionList',
+					'公開API: GET /PromotionList?p=pc|android|ios',
 					'レスポンスは { Avatar: PromotionItem[], World: PromotionItem[] }',
 					'PromotionItem: Title / Anchor / Description / Link / ID / Image',
-					'Image は設定により Base64 文字列 または 空文字を返す',
-					'公開APIは都度集計せず、管理画面更新時に再生成したキャッシュJSONを返す',
+					'Image は各プラットフォーム向けに変換済みの Base64 データのみを返し、原画像は公開しない',
+					'画像変換は管理画面から pc → android → ios の順で実行する',
+					'公開APIは都度変換せず、管理画面更新時に再生成したキャッシュJSONを返す',
 					'JSON 総サイズ上限は 100MB',
 				],
 			},

@@ -20,7 +20,6 @@ export function buildManagerAppPageHtml() {
       <div class="pt-2 border-t border-violet-100">
         <p class="text-xs font-semibold text-[color:var(--mgr-muted)] mb-1">PromotionList</p>
         <button class="nav-item" data-panel="promotion-manage">項目管理</button>
-        <button class="nav-item" data-panel="promotion-api-setting">API設定</button>
         <button class="nav-item" data-panel="docs-promotion">説明ページ</button>
       </div>
       <button id="logoutButton" class="mt-3 px-3 py-2 rounded-lg bg-violet-100 text-violet-700 text-sm font-semibold">ログアウト</button>
@@ -106,16 +105,6 @@ export function buildManagerAppPageHtml() {
         </div>
       </section>
 
-      <section id="panel-promotion-api-setting" class="card p-5 space-y-4 hidden">
-        <h2 class="text-xl font-bold">PromotionList / API設定</h2>
-        <p class="text-sm text-[color:var(--mgr-muted)]">公開APIで画像データを返すかを設定します。変更後はキャッシュJSONを再生成します。</p>
-        <label class="text-sm flex items-center gap-2">
-          <input id="promotionIncludeImageInput" type="checkbox" checked />
-          <span>公開APIでImage(Base64)を返す</span>
-        </label>
-        <button id="promotionSaveApiSettingButton" class="px-4 py-2 rounded-xl bg-violet-600 text-white font-semibold hover:bg-violet-500">API設定を保存</button>
-      </section>
-
       <section id="panel-docs-ai" class="card p-5 hidden"><h2 class="text-xl font-bold mb-3">AIサービス 説明ページ</h2><div id="docsAiBody" class="text-sm space-y-1 text-[color:var(--mgr-text)]"></div></section>
       <section id="panel-docs-promotion" class="card p-5 hidden"><h2 class="text-xl font-bold mb-3">PromotionList 説明ページ</h2><div id="docsPromotionBody" class="text-sm space-y-1 text-[color:var(--mgr-text)]"></div></section>
       <div id="globalLoadingOverlay" class="loading-overlay hidden" aria-live="polite" aria-busy="true">
@@ -157,6 +146,10 @@ export function buildManagerAppPageHtml() {
           </div>
         </div>
         <p id="promotionImageSizeWarning" class="text-xs text-yellow-700 md:col-span-2 hidden">512を超える画像は容量を圧迫する可能性があります。</p>
+        <div class="md:col-span-2 flex flex-wrap items-center gap-2">
+          <button id="promotionResizeToMultipleOf4Button" type="button" class="px-3 py-2 rounded-lg bg-violet-100 text-violet-700 text-sm font-semibold">4の倍数へ拡大して保存内容に反映</button>
+          <p id="promotionImageDimensionText" class="text-xs text-[color:var(--mgr-muted)]">画像サイズ: -</p>
+        </div>
         <div class="md:col-span-2 space-y-2">
           <p class="text-sm font-semibold">圧縮後プレビュー</p>
           <button id="promotionImagePreviewOpenButton" type="button" class="hidden px-3 py-2 rounded-lg bg-violet-100 text-violet-700 text-sm font-semibold">プレビューを拡大表示</button>
@@ -187,6 +180,25 @@ export function buildManagerAppPageHtml() {
       </div>
       <div class="flex-1 overflow-auto flex items-center justify-center">
         <img id="promotionImagePreviewLarge" class="max-w-full max-h-full object-contain" alt="promotion-preview-large" />
+      </div>
+    </div>
+  </div>
+  <div id="promotionConvertModal" class="modal-backdrop hidden">
+    <div class="card w-full max-w-3xl p-5 space-y-4">
+      <div class="flex items-center justify-between gap-3">
+        <div>
+          <h3 id="promotionConvertModalTitle" class="text-lg font-bold">画像変換</h3>
+          <p id="promotionConvertModalMeta" class="text-xs text-[color:var(--mgr-muted)]">-</p>
+        </div>
+        <button id="promotionConvertModalCloseButton" class="px-3 py-1 rounded bg-violet-100 text-violet-700 text-sm font-semibold">閉じる</button>
+      </div>
+      <div class="flex flex-wrap gap-2">
+        <button id="promotionConvertResizeButton" class="px-4 py-2 rounded-xl bg-violet-100 text-violet-700 font-semibold">4の倍数へ拡大して保存</button>
+        <button id="promotionConvertRunButton" class="px-4 py-2 rounded-xl bg-violet-600 text-white font-semibold hover:bg-violet-500">変換開始</button>
+      </div>
+      <div class="rounded-xl border border-[color:var(--mgr-border)] bg-violet-50 p-3 space-y-2">
+        <p class="text-sm font-semibold">変換ログ</p>
+        <pre id="promotionConvertLog" class="text-xs whitespace-pre-wrap break-all text-[color:var(--mgr-text)] min-h-40 max-h-96 overflow-auto"></pre>
       </div>
     </div>
   </div>

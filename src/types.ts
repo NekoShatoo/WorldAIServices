@@ -7,6 +7,8 @@ export interface Env {
 	AI_API_URL: string;
 	AI_API_KEY: string;
 	AI_MODEL?: string;
+	CRUNCH_API_URL: string;
+	CRUNCH_API_TOKEN: string;
 }
 
 export interface ServiceConfig {
@@ -99,6 +101,7 @@ export interface TranslationStatsSummary {
 }
 
 export type PromotionItemType = 'Avatar' | 'World';
+export type PromotionPlatform = 'pc' | 'android' | 'ios';
 
 export interface PromotionItem {
 	ID: string;
@@ -107,6 +110,11 @@ export interface PromotionItem {
 	Description: string;
 	Link: string;
 	Image: string;
+	Type?: PromotionItemType;
+	UpdatedAt?: string;
+	DisplayOrder?: number;
+	ConvertedPlatforms?: PromotionPlatform[];
+	IsImageConverted?: boolean;
 }
 
 export interface PromotionPayload {
@@ -114,6 +122,8 @@ export interface PromotionPayload {
 	World: PromotionItem[];
 }
 
-export interface PromotionApiConfig {
-	includeImageInResponse: boolean;
+export interface PromotionPlatformPayloadBundle {
+	pc: PromotionPayload;
+	android: PromotionPayload;
+	ios: PromotionPayload;
 }

@@ -1,5 +1,5 @@
 import { AutoRouter } from 'itty-router';
-import { Env } from './types';
+import { Env, PromotionPlatform } from './types';
 import { jsonResponse, countCharacters, buildCacheKey, JSON_HEADERS } from './utils';
 import { TRANSLATION_PROMPT_VERSION } from './constants';
 import { loadConfig, getCachedTranslation, runDatabaseMaintenance, recordError, checkRateLimit, recordTranslationStats, getPromotionListPayload } from './database';
@@ -17,7 +17,7 @@ router.get('/', (request, env) => handleHealth(env));
 router.get('/health', (request, env) => handleHealth(env));
 
 router.get('/trans', (request, env, ctx) => handleTranslate(request, env, ctx, new URL(request.url)));
-router.get('/PromotionList', (request, env) => handlePromotionList(env));
+router.get('/PromotionList', (request, env) => handlePromotionList(env, new URL(request.url)));
 
 router.get('/mgr', () => handleManagerPage());
 router.get('/mgr/', () => handleManagerPage());
@@ -162,8 +162,10 @@ function handleManagerAppPage() {
 	});
 }
 
-async function handlePromotionList(env: Env) {
-	return new Response(JSON.stringify(await getPromotionListPayload(env)), {
+async function handlePromotionList(env: Env, url: URL) {
+	const platform = String(url.searchParams.get('p') ?? '').trim() as PromotionPlatform;
+	if (platform !== 'pc' && platform !== 'android' && platform !== 'ios') return jsonResponse({ status: 'error', result: 'p は pc/android/ios を指定してください。' }, 400);
+	return new Response(JSON.stringify(await getPromotionListPayload(env, platform)), {
 		status: 200,
 		headers: {
 			...JSON_HEADERS,

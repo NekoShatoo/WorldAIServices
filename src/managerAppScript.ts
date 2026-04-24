@@ -6,7 +6,6 @@ export const MANAGER_APP_SCRIPT = `
       aiOperation: "ai-operation",
       aiTools: "ai-tools",
       promotionManage: "promotion-manage",
-      promotionApiSetting: "promotion-api-setting",
       docsAi: "docs-ai",
       docsPromotion: "docs-promotion",
     };
@@ -14,6 +13,7 @@ export const MANAGER_APP_SCRIPT = `
       create: "create",
       edit: "edit",
     };
+    const PROMOTION_PLATFORMS = ["pc", "android", "ios"];
 
     const state = {
       token: localStorage.getItem("mgr_token") || "",
@@ -32,7 +32,8 @@ export const MANAGER_APP_SCRIPT = `
       promotionDragAutoScrollRaf: 0,
       promotionDragAutoScrollSpeed: 0,
       promotionThumbRenderToken: 0,
-      promotionApiConfig: { includeImageInResponse: true },
+      currentConvertItemId: "",
+      convertModalBusy: false,
     };
     if (!state.token) location.href = "/mgr";
 
@@ -67,7 +68,6 @@ export const MANAGER_APP_SCRIPT = `
         [PANEL_KEYS.aiOperation]: document.getElementById("panel-ai-operation"),
         [PANEL_KEYS.aiTools]: document.getElementById("panel-ai-tools"),
         [PANEL_KEYS.promotionManage]: document.getElementById("panel-promotion-manage"),
-        [PANEL_KEYS.promotionApiSetting]: document.getElementById("panel-promotion-api-setting"),
         [PANEL_KEYS.docsAi]: document.getElementById("panel-docs-ai"),
         [PANEL_KEYS.docsPromotion]: document.getElementById("panel-docs-promotion"),
       },
@@ -83,8 +83,6 @@ export const MANAGER_APP_SCRIPT = `
       promotionSortSaveButton: document.getElementById("promotionSortSaveButton"),
       promotionSortCancelButton: document.getElementById("promotionSortCancelButton"),
       promotionSortHint: document.getElementById("promotionSortHint"),
-      promotionIncludeImageInput: document.getElementById("promotionIncludeImageInput"),
-      promotionSaveApiSettingButton: document.getElementById("promotionSaveApiSettingButton"),
       docsAiBody: document.getElementById("docsAiBody"),
       docsPromotionBody: document.getElementById("docsPromotionBody"),
       promotionModal: document.getElementById("promotionModal"),
@@ -99,6 +97,8 @@ export const MANAGER_APP_SCRIPT = `
       promotionCompressEnabled: document.getElementById("promotionCompressEnabled"),
       promotionCompressMaxSize: document.getElementById("promotionCompressMaxSize"),
       promotionImageSizeWarning: document.getElementById("promotionImageSizeWarning"),
+      promotionResizeToMultipleOf4Button: document.getElementById("promotionResizeToMultipleOf4Button"),
+      promotionImageDimensionText: document.getElementById("promotionImageDimensionText"),
       promotionTypeInput: document.getElementById("promotionTypeInput"),
       promotionIdInput: document.getElementById("promotionIdInput"),
       promotionTitleInput: document.getElementById("promotionTitleInput"),
@@ -114,6 +114,13 @@ export const MANAGER_APP_SCRIPT = `
       promotionImagePreviewModal: document.getElementById("promotionImagePreviewModal"),
       promotionImagePreviewLarge: document.getElementById("promotionImagePreviewLarge"),
       promotionImagePreviewCloseButton: document.getElementById("promotionImagePreviewCloseButton"),
+      promotionConvertModal: document.getElementById("promotionConvertModal"),
+      promotionConvertModalTitle: document.getElementById("promotionConvertModalTitle"),
+      promotionConvertModalMeta: document.getElementById("promotionConvertModalMeta"),
+      promotionConvertModalCloseButton: document.getElementById("promotionConvertModalCloseButton"),
+      promotionConvertResizeButton: document.getElementById("promotionConvertResizeButton"),
+      promotionConvertRunButton: document.getElementById("promotionConvertRunButton"),
+      promotionConvertLog: document.getElementById("promotionConvertLog"),
       globalLoadingOverlay: document.getElementById("globalLoadingOverlay"),
       globalLoadingText: document.getElementById("globalLoadingText"),
     };
@@ -197,11 +204,98 @@ export const MANAGER_APP_SCRIPT = `
       ui.simulateResultText.textContent = JSON.stringify(data, null, 2);
     }
 
+    function getPromotionItemById(id) {
+      return state.promotionItems.find((item) => item.ID === id) || null;
+    }
+
     function getPromotionItemDataUrl(item) {
       const raw = String(item && item.Image ? item.Image : "").trim();
       if (!raw) return "";
       if (raw.startsWith("data:image/")) return raw;
       return "data:image/*;base64," + raw;
+    }
+
+    async function loadImageElement(source) {
+      return await new Promise((resolve, reject) => {
+        const image = new Image();
+        image.onload = () => resolve(image);
+        image.onerror = () => reject(new Error("image_load_failed"));
+        image.src = source;
+      });
+    }
+
+    async function getImageMetaFromBase64(base64Text) {
+      const source = getPromotionItemDataUrl({ Image: base64Text });
+      if (!source) return null;
+      const image = await loadImageElement(source);
+      const canvas = document.createElement("canvas");
+      canvas.width = image.width;
+      canvas.height = image.height;
+      const context = canvas.getContext("2d", { willReadFrequently: true });
+      if (!context) throw new Error("canvas_context_missing");
+      context.drawImage(image, 0, 0, image.width, image.height);
+      const pixels = context.getImageData(0, 0, image.width, image.height).data;
+      let hasAlpha = false;
+      for (let index = 3; index < pixels.length; index += 4) {
+        if (pixels[index] !== 255) {
+          hasAlpha = true;
+          break;
+        }
+      }
+      return {
+        width: image.width,
+        height: image.height,
+        hasAlpha,
+      };
+    }
+
+    function isMultipleOf4(value) {
+      return value > 0 && value % 4 === 0;
+    }
+
+    function isImageMetaConvertible(meta) {
+      return !!meta && isMultipleOf4(meta.width) && isMultipleOf4(meta.height);
+    }
+
+    function formatImageMeta(meta) {
+      if (!meta) return "画像サイズ: -";
+      return "画像サイズ: " + meta.width + " x " + meta.height + " / " + (meta.hasAlpha ? "透明あり" : "透明なし");
+    }
+
+    async function refreshPromotionImageDimensionText() {
+      const imageValue = ui.promotionImageInput.value.trim();
+      if (!imageValue) {
+        ui.promotionImageDimensionText.textContent = "画像サイズ: -";
+        return null;
+      }
+      try {
+        const meta = await getImageMetaFromBase64(imageValue);
+        ui.promotionImageDimensionText.textContent = formatImageMeta(meta);
+        return meta;
+      } catch (error) {
+        ui.promotionImageDimensionText.textContent = "画像サイズ: 読み取り失敗";
+        console.error("[mgr] 画像メタ取得に失敗しました", error);
+        return null;
+      }
+    }
+
+    async function resizeBase64ImageToNextMultipleOf4(base64Text) {
+      const source = getPromotionItemDataUrl({ Image: base64Text });
+      if (!source) return { base64: "", width: 0, height: 0 };
+      const image = await loadImageElement(source);
+      const targetWidth = Math.ceil(image.width / 4) * 4;
+      const targetHeight = Math.ceil(image.height / 4) * 4;
+      const canvas = document.createElement("canvas");
+      canvas.width = targetWidth;
+      canvas.height = targetHeight;
+      const context = canvas.getContext("2d");
+      if (!context) throw new Error("canvas_context_missing");
+      context.drawImage(image, 0, 0, targetWidth, targetHeight);
+      return {
+        base64: canvas.toDataURL("image/png").split(",")[1] || "",
+        width: targetWidth,
+        height: targetHeight,
+      };
     }
 
     function estimatePromotionBytes(payload) {
@@ -241,7 +335,7 @@ export const MANAGER_APP_SCRIPT = `
         hidePromotionMagnifier();
         return;
       }
-      const source = "data:image/*;base64," + normalized;
+      const source = getPromotionItemDataUrl({ Image: normalized });
       ui.promotionImagePreview.src = source;
       ui.promotionImagePreviewLarge.src = source;
       ui.promotionImagePreviewContainer.classList.remove("hidden");
@@ -255,7 +349,6 @@ export const MANAGER_APP_SCRIPT = `
 
     function handlePromotionMagnifierMove(event) {
       if (!ui.promotionImagePreview.getAttribute("src")) return;
-
       const rect = ui.promotionImagePreview.getBoundingClientRect();
       if (rect.width <= 0 || rect.height <= 0) return;
 
@@ -302,12 +395,7 @@ export const MANAGER_APP_SCRIPT = `
     }
 
     async function dataUrlToImage(source) {
-      return await new Promise((resolve, reject) => {
-        const image = new Image();
-        image.onload = () => resolve(image);
-        image.onerror = () => reject(new Error("image_load_failed"));
-        image.src = source;
-      });
+      return await loadImageElement(source);
     }
 
     function imageToBase64(image, maxSize, enableCompress) {
@@ -332,8 +420,10 @@ export const MANAGER_APP_SCRIPT = `
 
     async function reapplyImageCompression() {
       const source = state.promotionUploadedImageDataUrl || normalizeImageValueToDataUrl(ui.promotionImageInput.value);
-      if (!source) return;
-
+      if (!source) {
+        await refreshPromotionImageDimensionText();
+        return;
+      }
       const maxSize = Number(ui.promotionCompressMaxSize.value || "512");
       const enableCompress = ui.promotionCompressEnabled.checked;
       try {
@@ -344,12 +434,18 @@ export const MANAGER_APP_SCRIPT = `
       }
       setPromotionImagePreview(ui.promotionImageInput.value);
       refreshPromotionPrediction();
+      await refreshPromotionImageDimensionText();
     }
 
     function renderPromotionUsage() {
       ui.promotionUsageText.textContent = (state.promotionUsage.usedBytes / (1024 * 1024)).toFixed(2) + "MB / " + (state.promotionUsage.maxBytes / (1024 * 1024)).toFixed(0) + "MB";
       ui.promotionUsageBar.style.width = Math.min(100, state.promotionUsage.usedPercent) + "%";
       ui.kpiPromotionUsage.textContent = state.promotionUsage.usedPercent.toFixed(2) + "%";
+    }
+
+    async function refreshPromotionManagePanel() {
+      invalidatePanels(PANEL_KEYS.promotionManage, PANEL_KEYS.dashboard);
+      await ensurePanelData(PANEL_KEYS.promotionManage, true);
     }
 
     function setPromotionSubmitProgress(percent, text) {
@@ -377,15 +473,18 @@ export const MANAGER_APP_SCRIPT = `
       ui.promotionSubmitProgressBox.classList.add("hidden");
     }
 
-    function getPromotionSourceItems() {
-      return state.promotionSortEditMode
-        ? state.promotionSortDraftIds.map((id) => state.promotionItems.find((item) => item.ID === id)).filter(Boolean)
-        : state.promotionItems;
-    }
-
     function buildPromotionThumbUi(imageDataUrl, itemId) {
       if (!imageDataUrl) return '<div class="w-14 h-14 rounded-lg border border-[color:var(--mgr-border)] bg-violet-50 text-[10px] text-[color:var(--mgr-muted)] flex items-center justify-center flex-shrink-0">NoImg</div>';
       return '<div class="relative w-14 h-14 rounded-lg border border-[color:var(--mgr-border)] overflow-hidden bg-violet-50 flex-shrink-0" data-thumb-id="' + encodeURIComponent(itemId) + '"><div class="absolute inset-0 flex items-center justify-center" data-thumb-spinner><span class="inline-block w-5 h-5 border-2 border-violet-300 border-t-violet-600 rounded-full animate-spin"></span></div><img class="hidden w-full h-full object-cover" data-thumb-img alt="thumb" /></div>';
+    }
+
+    function buildPromotionConvertButton(item) {
+      if (!String(item.Image || "").trim()) return "";
+      const converted = !!item.IsImageConverted;
+      const baseClass = converted
+        ? "px-2 py-1 rounded bg-emerald-100 text-emerald-700 text-xs"
+        : "px-2 py-1 rounded bg-violet-600 text-white text-xs";
+      return '<button class="' + baseClass + '" data-promotion-convert="' + item.ID + '">' + (converted ? "変換済み" : "変換") + '</button>';
     }
 
     function buildPromotionItemCard(item) {
@@ -393,8 +492,15 @@ export const MANAGER_APP_SCRIPT = `
       const dragAttrs = state.promotionSortEditMode ? ' draggable="true" data-promotion-drag-id="' + item.ID + '"' : "";
       const moveUi = state.promotionSortEditMode ? '<span class="text-xs px-2 py-1 rounded bg-violet-100 text-violet-700 cursor-grab">ドラッグ</span>' : "";
       const previewUi = imageDataUrl ? '<button class="px-2 py-1 rounded bg-violet-100 text-violet-700 text-xs" data-promotion-preview="' + item.ID + '">画像</button>' : "";
+      const convertUi = buildPromotionConvertButton(item);
       const thumbUi = buildPromotionThumbUi(imageDataUrl, item.ID);
-      return '<div class="card p-3" ' + dragAttrs + '><div class="flex items-center justify-between gap-2"><div class="flex items-center gap-2">' + moveUi + thumbUi + '<div><p class="font-semibold">' + item.Type + ' / ' + (item.Title || "(no title)") + '</p><p class="text-xs text-[color:var(--mgr-muted)]">ID: ' + item.ID + '</p></div></div><div class="flex gap-2">' + previewUi + '<button class="px-2 py-1 rounded bg-violet-100 text-violet-700 text-xs" data-promotion-edit="' + item.ID + '">編集</button><button class="px-2 py-1 rounded bg-red-100 text-red-700 text-xs" data-promotion-delete="' + item.ID + '">削除</button></div></div><p class="text-xs mt-2 text-[color:var(--mgr-muted)]">' + (item.Description || "(no description)") + '</p></div>';
+      return '<div class="card p-3" ' + dragAttrs + '><div class="flex items-center justify-between gap-2"><div class="flex items-center gap-2">' + moveUi + thumbUi + '<div><p class="font-semibold">' + item.Type + ' / ' + (item.Title || "(no title)") + '</p><p class="text-xs text-[color:var(--mgr-muted)]">ID: ' + item.ID + '</p></div></div><div class="flex gap-2">' + previewUi + convertUi + '<button class="px-2 py-1 rounded bg-violet-100 text-violet-700 text-xs" data-promotion-edit="' + item.ID + '">編集</button><button class="px-2 py-1 rounded bg-red-100 text-red-700 text-xs" data-promotion-delete="' + item.ID + '">削除</button></div></div><p class="text-xs mt-2 text-[color:var(--mgr-muted)]">' + (item.Description || "(no description)") + '</p></div>';
+    }
+
+    function getPromotionSourceItems() {
+      return state.promotionSortEditMode
+        ? state.promotionSortDraftIds.map((id) => state.promotionItems.find((item) => item.ID === id)).filter(Boolean)
+        : state.promotionItems;
     }
 
     function renderPromotionItems() {
@@ -402,7 +508,6 @@ export const MANAGER_APP_SCRIPT = `
         ui.promotionItemsList.innerHTML = '<p class="text-sm text-[color:var(--mgr-muted)]">登録項目はありません。</p>';
         return;
       }
-
       const sourceItems = getPromotionSourceItems();
       ui.promotionItemsList.innerHTML = sourceItems.map((item) => buildPromotionItemCard(item)).join("");
       state.promotionThumbRenderToken += 1;
@@ -428,16 +533,13 @@ export const MANAGER_APP_SCRIPT = `
         const source = getPromotionItemDataUrl(item);
         if (source) imageMap[item.ID] = source;
       });
-
       const hosts = Array.from(ui.promotionItemsList.querySelectorAll("[data-thumb-id]"));
       for (const host of hosts) {
         if (renderToken !== state.promotionThumbRenderToken) return;
-
         const encodedId = String(host.getAttribute("data-thumb-id") || "");
         const id = decodeURIComponent(encodedId);
         const source = imageMap[id];
         if (!source) continue;
-
         const spinner = host.querySelector("[data-thumb-spinner]");
         const target = host.querySelector("[data-thumb-img]");
         const loader = new Image();
@@ -564,14 +666,6 @@ export const MANAGER_APP_SCRIPT = `
       await loadPromotionItems();
     }
 
-    async function loadPromotionApiConfig() {
-      const apiConfigResult = (await callApi("/promotion/api-config", { loadingMessage: "PromotionList の設定を読み込んでいます..." })).data;
-      if (apiConfigResult.status === "ok") {
-        state.promotionApiConfig = apiConfigResult.result;
-        ui.promotionIncludeImageInput.checked = !!state.promotionApiConfig.includeImageInResponse;
-      }
-    }
-
     async function loadStatus() {
       const result = (await callApi("/status", { loadingMessage: "設定情報を読み込んでいます..." })).data;
       if (result.status !== "ok") return null;
@@ -643,7 +737,6 @@ export const MANAGER_APP_SCRIPT = `
       [PANEL_KEYS.dashboard]: loadDashboard,
       [PANEL_KEYS.aiConfig]: loadStatus,
       [PANEL_KEYS.promotionManage]: async () => await loadPromotionManageData(true),
-      [PANEL_KEYS.promotionApiSetting]: loadPromotionApiConfig,
       [PANEL_KEYS.docsAi]: createDocsLoader(ui.docsAiBody, "/docs/ai", "AIサービスの説明を読み込んでいます..."),
       [PANEL_KEYS.docsPromotion]: createDocsLoader(ui.docsPromotionBody, "/docs/promotion", "PromotionList の説明を読み込んでいます..."),
     };
@@ -654,11 +747,6 @@ export const MANAGER_APP_SCRIPT = `
       if (!loader) return;
       await loader();
       state.loadedPanels[panelKey] = true;
-    }
-
-    async function refreshPromotionManagePanel() {
-      invalidatePanels(PANEL_KEYS.promotionManage, PANEL_KEYS.dashboard);
-      await ensurePanelData(PANEL_KEYS.promotionManage, true);
     }
 
     function resetPromotionForm() {
@@ -674,6 +762,7 @@ export const MANAGER_APP_SCRIPT = `
       ui.promotionCompressMaxSize.value = "512";
       updatePromotionImageSizeWarning();
       setPromotionImagePreview("");
+      ui.promotionImageDimensionText.textContent = "画像サイズ: -";
       endPromotionSubmitProgress();
       state.promotionEditingId = "";
       state.promotionUploadedImageDataUrl = "";
@@ -692,7 +781,7 @@ export const MANAGER_APP_SCRIPT = `
       state.promotionUploadedImageDataUrl = "";
     }
 
-    function openPromotionModal(mode, item) {
+    async function openPromotionModal(mode, item) {
       state.promotionModalMode = mode;
       switch (mode) {
         case PROMOTION_MODAL_MODE.create:
@@ -711,6 +800,7 @@ export const MANAGER_APP_SCRIPT = `
       }
       ui.promotionModal.classList.remove("hidden");
       refreshPromotionPrediction();
+      await refreshPromotionImageDimensionText();
     }
 
     function closePromotionModal() {
@@ -773,8 +863,135 @@ export const MANAGER_APP_SCRIPT = `
       closePromotionModal();
     }
 
-    function getPromotionItemById(id) {
-      return state.promotionItems.find((item) => item.ID === id) || null;
+    async function savePromotionItem(item, loadingMessage) {
+      const result = (await callApi("/promotion/items/update", {
+        method: "POST",
+        body: JSON.stringify({
+          id: item.ID,
+          type: item.Type,
+          item: {
+            ID: item.ID,
+            Title: item.Title,
+            Anchor: item.Anchor,
+            Description: item.Description,
+            Link: item.Link,
+            Image: item.Image,
+          },
+          predictedBytes: estimatePromotionBytes(item),
+        }),
+        loadingMessage,
+      })).data;
+      if (result.status !== "ok") throw new Error("promotion_item_save_failed");
+      await refreshPromotionManagePanel();
+      return getPromotionItemById(item.ID);
+    }
+
+    function appendConvertLog(message) {
+      const current = ui.promotionConvertLog.textContent || "";
+      ui.promotionConvertLog.textContent = current + (current ? "\\n" : "") + message;
+      ui.promotionConvertLog.scrollTop = ui.promotionConvertLog.scrollHeight;
+    }
+
+    function setConvertModalBusy(busy) {
+      state.convertModalBusy = busy;
+      ui.promotionConvertRunButton.disabled = busy;
+      ui.promotionConvertResizeButton.disabled = busy;
+      ui.promotionConvertModalCloseButton.disabled = busy;
+      ui.promotionConvertRunButton.classList.toggle("opacity-70", busy);
+      ui.promotionConvertResizeButton.classList.toggle("opacity-70", busy);
+    }
+
+    async function openPromotionConvertModal(id) {
+      const item = getPromotionItemById(id);
+      if (!item) return;
+      state.currentConvertItemId = id;
+      ui.promotionConvertModalTitle.textContent = "画像変換 / " + (item.Title || item.ID);
+      const meta = await getImageMetaFromBase64(item.Image);
+      ui.promotionConvertModalMeta.textContent = formatImageMeta(meta);
+      ui.promotionConvertLog.textContent = "";
+      appendConvertLog("対象ID: " + item.ID);
+      appendConvertLog("現在状態: " + (item.IsImageConverted ? "変換済み" : "未変換"));
+      if (meta) {
+        appendConvertLog("画像サイズ: " + meta.width + " x " + meta.height);
+        appendConvertLog("アルファ: " + (meta.hasAlpha ? "あり" : "なし"));
+        if (!isImageMetaConvertible(meta)) appendConvertLog("注意: 画像サイズは縦横とも 4 の倍数である必要があります。");
+      }
+      ui.promotionConvertModal.classList.remove("hidden");
+      setConvertModalBusy(false);
+    }
+
+    function closePromotionConvertModal() {
+      if (state.convertModalBusy) return;
+      ui.promotionConvertModal.classList.add("hidden");
+      state.currentConvertItemId = "";
+      ui.promotionConvertLog.textContent = "";
+    }
+
+    async function resizeCurrentConvertItemToMultipleOf4AndSave() {
+      const item = getPromotionItemById(state.currentConvertItemId);
+      if (!item || !item.Image) return;
+      const meta = await getImageMetaFromBase64(item.Image);
+      if (!meta) return;
+      if (isImageMetaConvertible(meta)) {
+        appendConvertLog("画像サイズは既に 4 の倍数です。保存は不要です。");
+        return;
+      }
+      setConvertModalBusy(true);
+      try {
+        appendConvertLog("画像を " + meta.width + " x " + meta.height + " から 4 の倍数へ拡大しています...");
+        const resized = await resizeBase64ImageToNextMultipleOf4(item.Image);
+        const savedItem = await savePromotionItem(Object.assign({}, item, { Image: resized.base64 }), "4 の倍数サイズへ保存しています...");
+        appendConvertLog("保存完了: " + resized.width + " x " + resized.height);
+        if (savedItem) {
+          ui.promotionConvertModalMeta.textContent = formatImageMeta(await getImageMetaFromBase64(savedItem.Image));
+        }
+      } finally {
+        setConvertModalBusy(false);
+      }
+    }
+
+    async function runPromotionConversion() {
+      const item = getPromotionItemById(state.currentConvertItemId);
+      if (!item || !item.Image) return;
+      const meta = await getImageMetaFromBase64(item.Image);
+      if (!isImageMetaConvertible(meta)) {
+        appendConvertLog("変換を開始できません。先に画像を 4 の倍数へ拡大して保存してください。");
+        return;
+      }
+
+      setConvertModalBusy(true);
+      try {
+        appendConvertLog("変換開始: pc → android → ios");
+        for (const platform of PROMOTION_PLATFORMS) {
+          appendConvertLog("[" + platform + "] 変換中...");
+          const result = (await callApi("/promotion/items/convert", {
+            method: "POST",
+            body: JSON.stringify({
+              id: item.ID,
+              platform,
+              hasAlpha: meta.hasAlpha,
+            }),
+            loadingMessage: platform + " 向け画像を変換しています...",
+          })).data;
+          if (result.status !== "ok") {
+            appendConvertLog("[" + platform + "] 失敗: " + result.result);
+            return;
+          }
+          appendConvertLog("[" + platform + "] 完了: " + result.result.textureFormat + " / " + result.result.outputFormat + " / " + result.result.outputBytes + " bytes");
+          await loadPromotionItems();
+        }
+        await loadPromotionUsage();
+        invalidatePanels(PANEL_KEYS.dashboard);
+        appendConvertLog("全プラットフォームの変換が完了しました。閉じることができます。");
+      } finally {
+        setConvertModalBusy(false);
+      }
+    }
+
+    async function deletePromotionItemById(id) {
+      if (!id || !confirm("ID " + id + " を削除しますか？")) return;
+      await callApi("/promotion/items/delete", { method: "POST", body: JSON.stringify({ id }), loadingMessage: "項目を削除しています..." });
+      await refreshPromotionManagePanel();
     }
 
     function openPromotionPreviewById(id) {
@@ -786,20 +1003,8 @@ export const MANAGER_APP_SCRIPT = `
       ui.promotionImagePreviewModal.classList.remove("hidden");
     }
 
-    async function deletePromotionItemById(id) {
-      if (!id || !confirm("ID " + id + " を削除しますか？")) return;
-      await callApi("/promotion/items/delete", { method: "POST", body: JSON.stringify({ id }), loadingMessage: "項目を削除しています..." });
-      await refreshPromotionManagePanel();
-    }
-
-    function openPromotionEditorById(id) {
-      const item = getPromotionItemById(id);
-      if (!item) return;
-      openPromotionModal(PROMOTION_MODAL_MODE.edit, item);
-    }
-
     async function handlePromotionListClick(event) {
-      const actionButton = event.target.closest("[data-promotion-delete], [data-promotion-preview], [data-promotion-edit]");
+      const actionButton = event.target.closest("[data-promotion-delete], [data-promotion-preview], [data-promotion-edit], [data-promotion-convert]");
       if (!actionButton) return;
 
       const deleteId = actionButton.getAttribute("data-promotion-delete");
@@ -815,7 +1020,14 @@ export const MANAGER_APP_SCRIPT = `
       }
 
       const editId = actionButton.getAttribute("data-promotion-edit");
-      if (editId) openPromotionEditorById(editId);
+      if (editId) {
+        const item = getPromotionItemById(editId);
+        if (item) await openPromotionModal(PROMOTION_MODAL_MODE.edit, item);
+        return;
+      }
+
+      const convertId = actionButton.getAttribute("data-promotion-convert");
+      if (convertId) await openPromotionConvertModal(convertId);
     }
 
     function bindNavigationEvents() {
@@ -855,7 +1067,7 @@ export const MANAGER_APP_SCRIPT = `
 
     function bindPromotionEvents() {
       ui.promotionItemsList.addEventListener("click", handlePromotionListClick);
-      ui.promotionCreateOpenButton.addEventListener("click", () => openPromotionModal(PROMOTION_MODAL_MODE.create));
+      ui.promotionCreateOpenButton.addEventListener("click", async () => await openPromotionModal(PROMOTION_MODAL_MODE.create));
       ui.promotionSortEditButton.addEventListener("click", () => setPromotionSortEditMode(true));
       ui.promotionSortCancelButton.addEventListener("click", () => setPromotionSortEditMode(false));
       ui.promotionSortSaveButton.addEventListener("click", async () => {
@@ -875,17 +1087,6 @@ export const MANAGER_APP_SCRIPT = `
       ui.refreshPromotionUsageButton.addEventListener("click", async () => {
         await loadPromotionUsage();
       });
-      ui.promotionSaveApiSettingButton.addEventListener("click", async () => {
-        const includeImageInResponse = !!ui.promotionIncludeImageInput.checked;
-        const result = (await callApi("/promotion/api-config", { method: "POST", body: JSON.stringify({ includeImageInResponse }), loadingMessage: "API設定を保存しています..." })).data;
-        if (result.status !== "ok") {
-          alert("API設定の保存に失敗しました。");
-          return;
-        }
-        state.promotionApiConfig.includeImageInResponse = includeImageInResponse;
-        invalidatePanels(PANEL_KEYS.promotionApiSetting);
-        await ensurePanelData(PANEL_KEYS.promotionApiSetting, true);
-      });
       ui.promotionFilterType.addEventListener("change", async () => {
         state.promotionSortEditMode = false;
         syncPromotionSortEditUi();
@@ -896,6 +1097,26 @@ export const MANAGER_APP_SCRIPT = `
       ui.promotionModalSubmitButton.addEventListener("click", submitPromotionModal);
       ui.promotionModal.addEventListener("click", (event) => {
         if (event.target === ui.promotionModal) closePromotionModal();
+      });
+      ui.promotionResizeToMultipleOf4Button.addEventListener("click", async () => {
+        const currentImage = ui.promotionImageInput.value.trim();
+        if (!currentImage) return;
+        const meta = await getImageMetaFromBase64(currentImage);
+        if (isImageMetaConvertible(meta)) {
+          alert("画像サイズは既に 4 の倍数です。");
+          return;
+        }
+        beginGlobalLoading("画像を 4 の倍数サイズへ拡大しています...");
+        try {
+          const resized = await resizeBase64ImageToNextMultipleOf4(currentImage);
+          ui.promotionImageInput.value = resized.base64;
+          state.promotionUploadedImageDataUrl = getPromotionItemDataUrl({ Image: resized.base64 });
+          setPromotionImagePreview(resized.base64);
+          refreshPromotionPrediction();
+          await refreshPromotionImageDimensionText();
+        } finally {
+          endGlobalLoading();
+        }
       });
       ui.promotionImagePreviewOpenButton.addEventListener("click", () => ui.promotionImagePreviewModal.classList.remove("hidden"));
       ui.promotionImagePreviewCloseButton.addEventListener("click", () => ui.promotionImagePreviewModal.classList.add("hidden"));
@@ -926,11 +1147,21 @@ export const MANAGER_APP_SCRIPT = `
           endGlobalLoading();
         }
       });
-      [ui.promotionTypeInput, ui.promotionTitleInput, ui.promotionAnchorInput, ui.promotionDescriptionInput, ui.promotionLinkInput, ui.promotionImageInput].forEach((input) => input.addEventListener("input", () => {
-        if (input === ui.promotionImageInput) setPromotionImagePreview(ui.promotionImageInput.value);
+      [ui.promotionTypeInput, ui.promotionTitleInput, ui.promotionAnchorInput, ui.promotionDescriptionInput, ui.promotionLinkInput, ui.promotionImageInput].forEach((input) => input.addEventListener("input", async () => {
+        if (input === ui.promotionImageInput) {
+          setPromotionImagePreview(ui.promotionImageInput.value);
+          await refreshPromotionImageDimensionText();
+        }
         refreshPromotionPrediction();
       }));
       ui.promotionIdInput.addEventListener("input", refreshPromotionPrediction);
+
+      ui.promotionConvertModalCloseButton.addEventListener("click", closePromotionConvertModal);
+      ui.promotionConvertModal.addEventListener("click", (event) => {
+        if (event.target === ui.promotionConvertModal) closePromotionConvertModal();
+      });
+      ui.promotionConvertResizeButton.addEventListener("click", resizeCurrentConvertItemToMultipleOf4AndSave);
+      ui.promotionConvertRunButton.addEventListener("click", runPromotionConversion);
     }
 
     function initializePage() {

@@ -9,7 +9,8 @@ import {
 	PromotionItem,
 	PromotionItemType,
 	PromotionPayload,
-	PromotionApiConfig,
+	PromotionPlatform,
+	PromotionPlatformPayloadBundle,
 } from './types';
 import { clampInteger, safeMetricNumber, parseStoredJsonObject, MAINTENANCE_BATCH_SIZE } from './utils';
 
@@ -22,8 +23,11 @@ export const DEFAULT_CONFIG: ServiceConfig = Object.freeze({
 });
 const PROMOTION_LIST_MAX_BYTES = 100 * 1024 * 1024;
 const PROMOTION_LIST_CHUNK_SIZE = 900000;
-const DEFAULT_PROMOTION_API_CONFIG: PromotionApiConfig = Object.freeze({
-	includeImageInResponse: true,
+const EMPTY_PROMOTION_PAYLOAD: PromotionPayload = Object.freeze({ Avatar: [], World: [] });
+const EMPTY_PROMOTION_PLATFORM_PAYLOAD_BUNDLE: PromotionPlatformPayloadBundle = Object.freeze({
+	pc: { Avatar: [], World: [] },
+	android: { Avatar: [], World: [] },
+	ios: { Avatar: [], World: [] },
 });
 
 export async function loadConfig(env: Env): Promise<ServiceConfig> {
@@ -459,6 +463,9 @@ export async function listPromotionItems(env: Env, itemType?: PromotionItemType)
       description,
       link,
       image,
+      LENGTH(image_pc) AS image_pc_length,
+      LENGTH(image_android) AS image_android_length,
+      LENGTH(image_ios) AS image_ios_length,
       updated_at,
       display_order
     FROM promotion_list_items
@@ -476,6 +483,9 @@ export async function listPromotionItems(env: Env, itemType?: PromotionItemType)
       description,
       link,
       image,
+      LENGTH(image_pc) AS image_pc_length,
+      LENGTH(image_android) AS image_android_length,
+      LENGTH(image_ios) AS image_ios_length,
       updated_at,
       display_order
     FROM promotion_list_items
@@ -491,36 +501,9 @@ export async function listPromotionItems(env: Env, itemType?: PromotionItemType)
 		Image: String(row.image ?? ''),
 		UpdatedAt: String(row.updated_at ?? ''),
 		DisplayOrder: safeMetricNumber(row.display_order),
+		ConvertedPlatforms: buildConvertedPlatformsFromRow(row),
+		IsImageConverted: hasAllConvertedPlatforms(row),
 	}));
-}
-
-export async function loadPromotionApiConfig(env: Env): Promise<PromotionApiConfig> {
-	const row = await env.STATE_DB.prepare(
-		`SELECT include_image_in_response
-    FROM promotion_api_config
-    WHERE config_id = 1`
-	).first<any>();
-	if (!row) return { ...DEFAULT_PROMOTION_API_CONFIG };
-	return {
-		includeImageInResponse: normalizeBooleanFlag(row.include_image_in_response, DEFAULT_PROMOTION_API_CONFIG.includeImageInResponse),
-	};
-}
-
-export async function updatePromotionApiConfig(env: Env, includeImageInResponse: boolean) {
-	await env.STATE_DB.prepare(
-		`INSERT INTO promotion_api_config (
-      config_id,
-      include_image_in_response,
-      updated_at
-    ) VALUES (1, ?, ?)
-    ON CONFLICT(config_id) DO UPDATE SET
-      include_image_in_response = excluded.include_image_in_response,
-      updated_at = excluded.updated_at`
-	)
-		.bind(includeImageInResponse ? 1 : 0, new Date().toISOString())
-		.run();
-
-	return await rebuildPromotionListCache(env);
 }
 
 export async function createPromotionItem(
@@ -551,10 +534,13 @@ export async function createPromotionItem(
       description,
       link,
       image,
+      image_pc,
+      image_android,
+      image_ios,
       display_order,
       created_at,
       updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, '', '', '', ?, ?, ?)`
 	)
 		.bind(payload.ID, itemType, payload.Title, payload.Anchor, payload.Description, payload.Link, payload.Image, nextOrder, now, now)
 		.run();
@@ -579,6 +565,9 @@ export async function updatePromotionItem(
 	const expected = current + Math.max(0, Math.floor(predictedPayloadBytes));
 	if (expected > PROMOTION_LIST_MAX_BYTES) return { ok: false as const, reason: 'payload_limit_exceeded', expectedBytes: expected };
 
+	const currentItem = await loadPromotionItemRecordById(env, id);
+	const rawImageChanged = !currentItem || currentItem.image !== payload.Image;
+
 	await env.STATE_DB.prepare(
 		`UPDATE promotion_list_items
     SET item_type = ?,
@@ -587,10 +576,25 @@ export async function updatePromotionItem(
         description = ?,
         link = ?,
         image = ?,
+        image_pc = ?,
+        image_android = ?,
+        image_ios = ?,
         updated_at = ?
     WHERE id = ?`
 	)
-		.bind(itemType, payload.Title, payload.Anchor, payload.Description, payload.Link, payload.Image, new Date().toISOString(), id)
+		.bind(
+			itemType,
+			payload.Title,
+			payload.Anchor,
+			payload.Description,
+			payload.Link,
+			payload.Image,
+			rawImageChanged ? '' : currentItem?.image_pc ?? '',
+			rawImageChanged ? '' : currentItem?.image_android ?? '',
+			rawImageChanged ? '' : currentItem?.image_ios ?? '',
+			new Date().toISOString(),
+			id
+		)
 		.run();
 
 	const summary = await rebuildPromotionListCache(env);
@@ -657,17 +661,14 @@ export async function reorderPromotionItems(env: Env, itemType: PromotionItemTyp
 	return { ok: true as const, summary: await rebuildPromotionListCache(env) };
 }
 
-export async function getPromotionListPayload(env: Env): Promise<PromotionPayload> {
+export async function getPromotionListPayload(env: Env, platform: PromotionPlatform): Promise<PromotionPayload> {
 	const payloadText = await loadPromotionPayloadText(env);
 	try {
 		const parsed = JSON.parse(payloadText);
-		if (!parsed || typeof parsed !== 'object') return { Avatar: [], World: [] };
-		return {
-			Avatar: Array.isArray((parsed as any).Avatar) ? (parsed as any).Avatar : [],
-			World: Array.isArray((parsed as any).World) ? (parsed as any).World : [],
-		};
+		if (!parsed || typeof parsed !== 'object') return clonePromotionPayload(EMPTY_PROMOTION_PAYLOAD);
+		return normalizePromotionPayload((parsed as any)[platform]);
 	} catch {
-		return { Avatar: [], World: [] };
+		return clonePromotionPayload(EMPTY_PROMOTION_PAYLOAD);
 	}
 }
 
@@ -681,8 +682,8 @@ export async function getPromotionListUsage(env: Env) {
 }
 
 export async function rebuildPromotionListCache(env: Env) {
-	const payload = await buildPromotionPayloadFromItems(env);
-	const payloadText = JSON.stringify(payload);
+	const payloadBundle = await buildPromotionPayloadBundleFromItems(env);
+	const payloadText = JSON.stringify(payloadBundle);
 	const payloadBytes = new TextEncoder().encode(payloadText).length;
 	if (payloadBytes > PROMOTION_LIST_MAX_BYTES) throw new Error('promotion_payload_limit_exceeded');
 
@@ -709,8 +710,7 @@ export async function rebuildPromotionListCache(env: Env) {
 	};
 }
 
-async function buildPromotionPayloadFromItems(env: Env): Promise<PromotionPayload> {
-	const apiConfig = await loadPromotionApiConfig(env);
+async function buildPromotionPayloadBundleFromItems(env: Env): Promise<PromotionPlatformPayloadBundle> {
 	const result = await env.STATE_DB.prepare(
 		`SELECT
       id,
@@ -719,25 +719,28 @@ async function buildPromotionPayloadFromItems(env: Env): Promise<PromotionPayloa
       anchor,
       description,
       link,
-      image
+      image_pc,
+      image_android,
+      image_ios
     FROM promotion_list_items
     ORDER BY item_type ASC, display_order ASC, updated_at DESC, id ASC`
 	).all<any>();
-	const payload: PromotionPayload = { Avatar: [], World: [] };
+	const payloadBundle = clonePromotionPlatformPayloadBundle(EMPTY_PROMOTION_PLATFORM_PAYLOAD_BUNDLE);
 	for (const row of result.results ?? []) {
-		const item = {
+		const baseItem = {
 			ID: String(row.id ?? ''),
 			Title: String(row.title ?? ''),
 			Anchor: String(row.anchor ?? ''),
 			Description: String(row.description ?? ''),
 			Link: String(row.link ?? ''),
-			Image: apiConfig.includeImageInResponse ? String(row.image ?? '') : '',
 		};
 		const type = String(row.item_type ?? '');
-		if (type === 'Avatar') payload.Avatar.push(item);
-		if (type === 'World') payload.World.push(item);
+		if (type !== 'Avatar' && type !== 'World') continue;
+		payloadBundle.pc[type].push({ ...baseItem, Image: String(row.image_pc ?? '') });
+		payloadBundle.android[type].push({ ...baseItem, Image: String(row.image_android ?? '') });
+		payloadBundle.ios[type].push({ ...baseItem, Image: String(row.image_ios ?? '') });
 	}
-	return payload;
+	return payloadBundle;
 }
 
 async function loadPromotionPayloadText(env: Env) {
@@ -766,4 +769,101 @@ function splitPromotionPayload(payloadText: string) {
 		chunks.push(payloadText.slice(index, index + PROMOTION_LIST_CHUNK_SIZE));
 	}
 	return chunks;
+}
+
+function normalizePromotionPayload(value: any): PromotionPayload {
+	if (!value || typeof value !== 'object') return clonePromotionPayload(EMPTY_PROMOTION_PAYLOAD);
+	return {
+		Avatar: Array.isArray(value.Avatar) ? value.Avatar : [],
+		World: Array.isArray(value.World) ? value.World : [],
+	};
+}
+
+function clonePromotionPayload(payload: PromotionPayload): PromotionPayload {
+	return {
+		Avatar: payload.Avatar.slice(),
+		World: payload.World.slice(),
+	};
+}
+
+function clonePromotionPlatformPayloadBundle(payloadBundle: PromotionPlatformPayloadBundle): PromotionPlatformPayloadBundle {
+	return {
+		pc: clonePromotionPayload(payloadBundle.pc),
+		android: clonePromotionPayload(payloadBundle.android),
+		ios: clonePromotionPayload(payloadBundle.ios),
+	};
+}
+
+function buildConvertedPlatformsFromRow(row: any): PromotionPlatform[] {
+	const platforms: PromotionPlatform[] = [];
+	if (safeMetricNumber(row?.image_pc_length) > 0) platforms.push('pc');
+	if (safeMetricNumber(row?.image_android_length) > 0) platforms.push('android');
+	if (safeMetricNumber(row?.image_ios_length) > 0) platforms.push('ios');
+	return platforms;
+}
+
+function hasAllConvertedPlatforms(row: any) {
+	return buildConvertedPlatformsFromRow(row).length === 3;
+}
+
+async function loadPromotionItemRecordById(env: Env, id: string) {
+	return await env.STATE_DB.prepare(
+		`SELECT
+      id,
+      item_type,
+      title,
+      anchor,
+      description,
+      link,
+      image,
+      image_pc,
+      image_android,
+      image_ios,
+      updated_at,
+      display_order
+    FROM promotion_list_items
+    WHERE id = ?`
+	)
+		.bind(id)
+		.first<any>();
+}
+
+export async function getPromotionItemById(env: Env, id: string) {
+	const row = await loadPromotionItemRecordById(env, id);
+	if (!row) return null;
+	return {
+		ID: String(row.id ?? ''),
+		Type: String(row.item_type ?? '') as PromotionItemType,
+		Title: String(row.title ?? ''),
+		Anchor: String(row.anchor ?? ''),
+		Description: String(row.description ?? ''),
+		Link: String(row.link ?? ''),
+		Image: String(row.image ?? ''),
+		UpdatedAt: String(row.updated_at ?? ''),
+		DisplayOrder: safeMetricNumber(row.display_order),
+		ConvertedPlatforms: buildConvertedPlatformsFromRow({
+			image_pc_length: String(row.image_pc ?? '').length,
+			image_android_length: String(row.image_android ?? '').length,
+			image_ios_length: String(row.image_ios ?? '').length,
+		}),
+		IsImageConverted: !!String(row.image ?? '').trim() && String(row.image_pc ?? '').length > 0 && String(row.image_android ?? '').length > 0 && String(row.image_ios ?? '').length > 0,
+	};
+}
+
+export async function savePromotionPlatformImage(env: Env, id: string, platform: PromotionPlatform, convertedImageBase64: string) {
+	const columnNameByPlatform = {
+		pc: 'image_pc',
+		android: 'image_android',
+		ios: 'image_ios',
+	};
+	const columnName = columnNameByPlatform[platform];
+	await env.STATE_DB.prepare(
+		`UPDATE promotion_list_items
+    SET ${columnName} = ?,
+        updated_at = ?
+    WHERE id = ?`
+	)
+		.bind(convertedImageBase64, new Date().toISOString(), id)
+		.run();
+	return await rebuildPromotionListCache(env);
 }

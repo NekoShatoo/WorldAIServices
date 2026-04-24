@@ -169,4 +169,12 @@ PromotionList 仕様
 - `src/managerAppScript.ts` を整理し、面板読込は `panelLoaders` の対応表で分配、Promotion 追加/更新は `buildPromotionSubmitRequest()` で共通化、一覧内の編集/削除/画像プレビューは個別バインドではなくイベント委譲へ変更した
 - 初期化処理は `bindNavigationEvents()` / `bindAiEvents()` / `bindPromotionEvents()` / `initializePage()` に分割し、後半のイベント登録が一塊で読みにくい状態を解消した
 - `withButtonDisabled()` / `invalidatePanels()` / `refreshPromotionManagePanel()` などの小さな共通関数を追加し、同じ disable/reload/invalidate 手順の重複を減らした
+- PromotionList 公開APIは `GET /PromotionList?p=pc|android|ios` に変更し、要求プラットフォーム向けの変換済み `Image` のみを返すようにした。原画像Base64は公開APIで返さない
+- PromotionList 項目テーブルに `image_pc` / `image_android` / `image_ios` を追加し、管理用の原画像 `image` と分離した。原画像更新時は変換済みデータを全消去して未変換状態へ戻す
+- 画像変換は Worker から外部 `crunch` API を順次呼び出す方式に変更した。設定は `pc: DXT1/DXT5 + crn`、`android: ETC1/ETC2 + ktx`、`ios: ETC1/ETC2 + ktx` を使用する
+- 外部変換APIの Bearer token はコードへ直書きせず `CRUNCH_API_TOKEN` 環境変数で参照する。`.dev.vars.example` にも追加した
+- 外部変換APIの URL もコード固定値をやめて `CRUNCH_API_URL` 環境変数から読むように変更した
+- 管理画面の一覧には画像がある項目だけ「変換 / 変換済み」ボタンを表示し、変換モーダル内で `pc → android → ios` の順に進行ログを追記表示するようにした
+- 変換前には画像サイズを調べ、縦横とも 4 の倍数でない場合は変換を拒否して明示的に案内するようにした
+- 変換モーダルには「4の倍数へ拡大して保存」ボタンを追加し、現在の原画像を縦横それぞれ切り上げた最寄りの 4 倍数サイズへ引き伸ばして保存できるようにした
 - 今回の `npx tsc --noEmit` では既存の `src/types.ts` の Durable Object 型エラー（`TranslationCoordinator` が `DurableObjectBranded` 制約を満たさない）が残っており、この変更起因の新規エラーは確認されなかった
