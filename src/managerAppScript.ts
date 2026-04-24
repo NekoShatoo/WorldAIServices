@@ -1,14 +1,30 @@
 export const MANAGER_APP_SCRIPT = `
     const MAX_PROMOTION_BYTES = 100 * 1024 * 1024;
+    const PANEL_KEYS = {
+      dashboard: "dashboard",
+      aiConfig: "ai-config",
+      aiOperation: "ai-operation",
+      aiTools: "ai-tools",
+      promotionManage: "promotion-manage",
+      promotionApiSetting: "promotion-api-setting",
+      docsAi: "docs-ai",
+      docsPromotion: "docs-promotion",
+    };
+    const PROMOTION_MODAL_MODE = {
+      create: "create",
+      edit: "edit",
+    };
+
     const state = {
       token: localStorage.getItem("mgr_token") || "",
       globalLoadingCount: 0,
       globalLoadingMessage: "",
+      loadedPanels: {},
       dayChart: null,
       langChart: null,
       promotionUsage: { usedBytes: 0, maxBytes: MAX_PROMOTION_BYTES, usedPercent: 0 },
       promotionItems: [],
-      promotionModalMode: "create",
+      promotionModalMode: PROMOTION_MODAL_MODE.create,
       promotionEditingId: "",
       promotionUploadedImageDataUrl: "",
       promotionSortEditMode: false,
@@ -46,14 +62,14 @@ export const MANAGER_APP_SCRIPT = `
       dashboardLoadingText: document.getElementById("dashboardLoadingText"),
       navItems: Array.from(document.querySelectorAll(".nav-item")),
       panels: {
-        dashboard: document.getElementById("panel-dashboard"),
-        "ai-config": document.getElementById("panel-ai-config"),
-        "ai-operation": document.getElementById("panel-ai-operation"),
-        "ai-tools": document.getElementById("panel-ai-tools"),
-        "promotion-manage": document.getElementById("panel-promotion-manage"),
-        "promotion-api-setting": document.getElementById("panel-promotion-api-setting"),
-        "docs-ai": document.getElementById("panel-docs-ai"),
-        "docs-promotion": document.getElementById("panel-docs-promotion"),
+        [PANEL_KEYS.dashboard]: document.getElementById("panel-dashboard"),
+        [PANEL_KEYS.aiConfig]: document.getElementById("panel-ai-config"),
+        [PANEL_KEYS.aiOperation]: document.getElementById("panel-ai-operation"),
+        [PANEL_KEYS.aiTools]: document.getElementById("panel-ai-tools"),
+        [PANEL_KEYS.promotionManage]: document.getElementById("panel-promotion-manage"),
+        [PANEL_KEYS.promotionApiSetting]: document.getElementById("panel-promotion-api-setting"),
+        [PANEL_KEYS.docsAi]: document.getElementById("panel-docs-ai"),
+        [PANEL_KEYS.docsPromotion]: document.getElementById("panel-docs-promotion"),
       },
       refreshPromotionUsageButton: document.getElementById("refreshPromotionUsageButton"),
       promotionUsageBar: document.getElementById("promotionUsageBar"),
@@ -102,16 +118,17 @@ export const MANAGER_APP_SCRIPT = `
       globalLoadingText: document.getElementById("globalLoadingText"),
     };
 
-    function getPromotionItemDataUrl(item) {
-      const raw = String(item && item.Image ? item.Image : "").trim();
-      if (!raw) return "";
-      if (raw.startsWith("data:image/")) return raw;
-      return "data:image/*;base64," + raw;
+    function invalidatePanels() {
+      for (const panelKey of arguments) delete state.loadedPanels[panelKey];
     }
 
-    function switchPanel(panelKey) {
-      for (const [key, panel] of Object.entries(ui.panels)) panel.classList.toggle("hidden", key !== panelKey);
-      for (const item of ui.navItems) item.classList.toggle("active", item.dataset.panel === panelKey);
+    async function withButtonDisabled(button, callback) {
+      button.disabled = true;
+      try {
+        await callback();
+      } finally {
+        button.disabled = false;
+      }
     }
 
     function setGlobalLoadingVisible(visible) {
@@ -165,34 +182,30 @@ export const MANAGER_APP_SCRIPT = `
       }
     }
 
+    function switchPanel(panelKey) {
+      for (const [key, panel] of Object.entries(ui.panels)) panel.classList.toggle("hidden", key !== panelKey);
+      for (const item of ui.navItems) item.classList.toggle("active", item.dataset.panel === panelKey);
+    }
+
+    async function switchPanelAndLoad(panelKey, forceReload) {
+      switchPanel(panelKey);
+      await ensurePanelData(panelKey, !!forceReload);
+    }
+
     function showSimulateResult(data) {
       ui.simulateResultBox.classList.remove("hidden");
       ui.simulateResultText.textContent = JSON.stringify(data, null, 2);
     }
 
-    function upsertDayChart(day) {
-      const labels = ["Cache Hit", "Cache Miss", "AI Success", "AI Failure"];
-      const values = [day.cacheHits, day.cacheMisses, day.aiSuccesses, day.aiFailures];
-      if (!state.dayChart) {
-        state.dayChart = new Chart(ui.dayChartCanvas, { type: "line", data: { labels, datasets: [{ data: values, borderColor: "#8b5cf6", backgroundColor: "rgba(139,92,246,0.18)", fill: true, tension: 0.3 }] }, options: { responsive: true, plugins: { legend: { display: false } } } });
-      } else {
-        state.dayChart.data.labels = labels;
-        state.dayChart.data.datasets[0].data = values;
-        state.dayChart.update();
-      }
+    function getPromotionItemDataUrl(item) {
+      const raw = String(item && item.Image ? item.Image : "").trim();
+      if (!raw) return "";
+      if (raw.startsWith("data:image/")) return raw;
+      return "data:image/*;base64," + raw;
     }
 
-    function upsertLangChart(day) {
-      const entries = Object.entries(day.languages || {}).sort((a, b) => b[1] - a[1]).slice(0, 8);
-      const labels = entries.map((item) => item[0]);
-      const values = entries.map((item) => item[1]);
-      if (!state.langChart) {
-        state.langChart = new Chart(ui.langChartCanvas, { type: "bar", data: { labels, datasets: [{ data: values, backgroundColor: "#a78bfa" }] }, options: { responsive: true, plugins: { legend: { display: false } } } });
-      } else {
-        state.langChart.data.labels = labels;
-        state.langChart.data.datasets[0].data = values;
-        state.langChart.update();
-      }
+    function estimatePromotionBytes(payload) {
+      return new Blob([JSON.stringify(payload)]).size;
     }
 
     function readPromotionForm() {
@@ -207,10 +220,6 @@ export const MANAGER_APP_SCRIPT = `
           Image: ui.promotionImageInput.value.trim(),
         },
       };
-    }
-
-    function estimatePromotionBytes(payload) {
-      return new Blob([JSON.stringify(payload)]).size;
     }
 
     function refreshPromotionPrediction() {
@@ -246,6 +255,7 @@ export const MANAGER_APP_SCRIPT = `
 
     function handlePromotionMagnifierMove(event) {
       if (!ui.promotionImagePreview.getAttribute("src")) return;
+
       const rect = ui.promotionImagePreview.getBoundingClientRect();
       if (rect.width <= 0 || rect.height <= 0) return;
 
@@ -323,6 +333,7 @@ export const MANAGER_APP_SCRIPT = `
     async function reapplyImageCompression() {
       const source = state.promotionUploadedImageDataUrl || normalizeImageValueToDataUrl(ui.promotionImageInput.value);
       if (!source) return;
+
       const maxSize = Number(ui.promotionCompressMaxSize.value || "512");
       const enableCompress = ui.promotionCompressEnabled.checked;
       try {
@@ -366,58 +377,36 @@ export const MANAGER_APP_SCRIPT = `
       ui.promotionSubmitProgressBox.classList.add("hidden");
     }
 
+    function getPromotionSourceItems() {
+      return state.promotionSortEditMode
+        ? state.promotionSortDraftIds.map((id) => state.promotionItems.find((item) => item.ID === id)).filter(Boolean)
+        : state.promotionItems;
+    }
+
+    function buildPromotionThumbUi(imageDataUrl, itemId) {
+      if (!imageDataUrl) return '<div class="w-14 h-14 rounded-lg border border-[color:var(--mgr-border)] bg-violet-50 text-[10px] text-[color:var(--mgr-muted)] flex items-center justify-center flex-shrink-0">NoImg</div>';
+      return '<div class="relative w-14 h-14 rounded-lg border border-[color:var(--mgr-border)] overflow-hidden bg-violet-50 flex-shrink-0" data-thumb-id="' + encodeURIComponent(itemId) + '"><div class="absolute inset-0 flex items-center justify-center" data-thumb-spinner><span class="inline-block w-5 h-5 border-2 border-violet-300 border-t-violet-600 rounded-full animate-spin"></span></div><img class="hidden w-full h-full object-cover" data-thumb-img alt="thumb" /></div>';
+    }
+
+    function buildPromotionItemCard(item) {
+      const imageDataUrl = getPromotionItemDataUrl(item);
+      const dragAttrs = state.promotionSortEditMode ? ' draggable="true" data-promotion-drag-id="' + item.ID + '"' : "";
+      const moveUi = state.promotionSortEditMode ? '<span class="text-xs px-2 py-1 rounded bg-violet-100 text-violet-700 cursor-grab">ドラッグ</span>' : "";
+      const previewUi = imageDataUrl ? '<button class="px-2 py-1 rounded bg-violet-100 text-violet-700 text-xs" data-promotion-preview="' + item.ID + '">画像</button>' : "";
+      const thumbUi = buildPromotionThumbUi(imageDataUrl, item.ID);
+      return '<div class="card p-3" ' + dragAttrs + '><div class="flex items-center justify-between gap-2"><div class="flex items-center gap-2">' + moveUi + thumbUi + '<div><p class="font-semibold">' + item.Type + ' / ' + (item.Title || "(no title)") + '</p><p class="text-xs text-[color:var(--mgr-muted)]">ID: ' + item.ID + '</p></div></div><div class="flex gap-2">' + previewUi + '<button class="px-2 py-1 rounded bg-violet-100 text-violet-700 text-xs" data-promotion-edit="' + item.ID + '">編集</button><button class="px-2 py-1 rounded bg-red-100 text-red-700 text-xs" data-promotion-delete="' + item.ID + '">削除</button></div></div><p class="text-xs mt-2 text-[color:var(--mgr-muted)]">' + (item.Description || "(no description)") + '</p></div>';
+    }
+
     function renderPromotionItems() {
       if (!state.promotionItems.length) {
         ui.promotionItemsList.innerHTML = '<p class="text-sm text-[color:var(--mgr-muted)]">登録項目はありません。</p>';
         return;
       }
-      const sourceItems = state.promotionSortEditMode
-        ? state.promotionSortDraftIds.map((id) => state.promotionItems.find((item) => item.ID === id)).filter(Boolean)
-        : state.promotionItems;
-      ui.promotionItemsList.innerHTML = sourceItems.map((item) => {
-        const imageDataUrl = getPromotionItemDataUrl(item);
-        const dragAttrs = state.promotionSortEditMode ? ' draggable="true" data-promotion-drag-id="' + item.ID + '"' : '';
-        const moveUi = state.promotionSortEditMode
-          ? '<span class="text-xs px-2 py-1 rounded bg-violet-100 text-violet-700 cursor-grab">ドラッグ</span>'
-          : '';
-        const previewUi = imageDataUrl
-          ? '<button class="px-2 py-1 rounded bg-violet-100 text-violet-700 text-xs" data-promotion-preview="' + item.ID + '">画像</button>'
-          : '';
-        const thumbUi = imageDataUrl
-          ? '<div class="relative w-14 h-14 rounded-lg border border-[color:var(--mgr-border)] overflow-hidden bg-violet-50 flex-shrink-0" data-thumb-id="' + encodeURIComponent(item.ID) + '"><div class="absolute inset-0 flex items-center justify-center" data-thumb-spinner><span class="inline-block w-5 h-5 border-2 border-violet-300 border-t-violet-600 rounded-full animate-spin"></span></div><img class="hidden w-full h-full object-cover" data-thumb-img alt="thumb" /></div>'
-          : '<div class="w-14 h-14 rounded-lg border border-[color:var(--mgr-border)] bg-violet-50 text-[10px] text-[color:var(--mgr-muted)] flex items-center justify-center flex-shrink-0">NoImg</div>';
-        return '<div class="card p-3" ' + dragAttrs + '><div class="flex items-center justify-between gap-2"><div class="flex items-center gap-2">' + moveUi + thumbUi + '<div><p class="font-semibold">' + item.Type + ' / ' + (item.Title || "(no title)") + '</p><p class="text-xs text-[color:var(--mgr-muted)]">ID: ' + item.ID + '</p></div></div><div class="flex gap-2">' + previewUi + '<button class="px-2 py-1 rounded bg-violet-100 text-violet-700 text-xs" data-promotion-edit="' + item.ID + '">編集</button><button class="px-2 py-1 rounded bg-red-100 text-red-700 text-xs" data-promotion-delete="' + item.ID + '">削除</button></div></div><p class="text-xs mt-2 text-[color:var(--mgr-muted)]">' + (item.Description || "(no description)") + '</p></div>';
-      }).join("");
+
+      const sourceItems = getPromotionSourceItems();
+      ui.promotionItemsList.innerHTML = sourceItems.map((item) => buildPromotionItemCard(item)).join("");
       state.promotionThumbRenderToken += 1;
       hydratePromotionListThumbnails(sourceItems, state.promotionThumbRenderToken);
-      Array.from(ui.promotionItemsList.querySelectorAll("[data-promotion-delete]")).forEach((button) => {
-        button.addEventListener("click", async () => {
-          const id = button.getAttribute("data-promotion-delete");
-          if (!id || !confirm("ID " + id + " を削除しますか？")) return;
-          await callApi("/promotion/items/delete", { method: "POST", body: JSON.stringify({ id }), loadingMessage: "項目を削除しています..." });
-          await loadPromotionData();
-        });
-      });
-      Array.from(ui.promotionItemsList.querySelectorAll("[data-promotion-preview]")).forEach((button) => {
-        button.addEventListener("click", () => {
-          const id = button.getAttribute("data-promotion-preview");
-          const item = state.promotionItems.find((entry) => entry.ID === id);
-          if (!item) return;
-          const source = getPromotionItemDataUrl(item);
-          if (!source) return;
-          ui.promotionImagePreviewLarge.src = source;
-          ui.promotionImagePreviewModal.classList.remove("hidden");
-        });
-      });
-      Array.from(ui.promotionItemsList.querySelectorAll("[data-promotion-edit]")).forEach((button) => {
-        button.addEventListener("click", () => {
-          const id = button.getAttribute("data-promotion-edit");
-          if (!id) return;
-          const item = state.promotionItems.find((entry) => entry.ID === id);
-          if (!item) return;
-          openPromotionModal("edit", item);
-        });
-      });
       if (state.promotionSortEditMode) bindPromotionSortDragEvents();
     }
 
@@ -439,13 +428,16 @@ export const MANAGER_APP_SCRIPT = `
         const source = getPromotionItemDataUrl(item);
         if (source) imageMap[item.ID] = source;
       });
+
       const hosts = Array.from(ui.promotionItemsList.querySelectorAll("[data-thumb-id]"));
       for (const host of hosts) {
         if (renderToken !== state.promotionThumbRenderToken) return;
+
         const encodedId = String(host.getAttribute("data-thumb-id") || "");
         const id = decodeURIComponent(encodedId);
         const source = imageMap[id];
         if (!source) continue;
+
         const spinner = host.querySelector("[data-thumb-spinner]");
         const target = host.querySelector("[data-thumb-img]");
         const loader = new Image();
@@ -462,6 +454,7 @@ export const MANAGER_APP_SCRIPT = `
 
     function bindPromotionSortDragEvents() {
       let draggingId = "";
+
       function stopPromotionDragAutoScroll() {
         state.promotionDragAutoScrollSpeed = 0;
         if (!state.promotionDragAutoScrollRaf) return;
@@ -536,19 +529,24 @@ export const MANAGER_APP_SCRIPT = `
       ui.promotionFilterType.disabled = state.promotionSortEditMode;
     }
 
-    async function loadPromotionData() {
+    function setPromotionSortEditMode(enabled) {
+      state.promotionSortEditMode = enabled;
+      state.promotionSortDraftIds = state.promotionItems.map((item) => item.ID);
+      syncPromotionSortEditUi();
+      renderPromotionItems();
+    }
+
+    async function loadPromotionUsage() {
+      const usageResult = (await callApi("/promotion/usage", { loadingMessage: "PromotionList の使用率を計算しています..." })).data;
+      if (usageResult.status === "ok") {
+        state.promotionUsage = usageResult.result;
+        renderPromotionUsage();
+      }
+    }
+
+    async function loadPromotionItems() {
       setSectionLoading(ui.promotionItemsList, ui.promotionLoadingText, true, "一覧を読み込み中...");
       try {
-        const apiConfigResult = (await callApi("/promotion/api-config", { loadingMessage: "PromotionList の設定を読み込んでいます..." })).data;
-        if (apiConfigResult.status === "ok") {
-          state.promotionApiConfig = apiConfigResult.result;
-          ui.promotionIncludeImageInput.checked = !!state.promotionApiConfig.includeImageInResponse;
-        }
-        const usageResult = (await callApi("/promotion/usage", { loadingMessage: "PromotionList の使用率を計算しています..." })).data;
-        if (usageResult.status === "ok") {
-          state.promotionUsage = usageResult.result;
-          renderPromotionUsage();
-        }
         const selectedType = ui.promotionFilterType.value;
         const itemsResult = (await callApi("/promotion/items?type=" + encodeURIComponent(selectedType), { loadingMessage: selectedType + " の一覧を読み込んでいます..." })).data;
         if (itemsResult.status === "ok") {
@@ -559,6 +557,108 @@ export const MANAGER_APP_SCRIPT = `
       } finally {
         setSectionLoading(ui.promotionItemsList, ui.promotionLoadingText, false);
       }
+    }
+
+    async function loadPromotionManageData(forceReloadUsage) {
+      if (forceReloadUsage) await loadPromotionUsage();
+      await loadPromotionItems();
+    }
+
+    async function loadPromotionApiConfig() {
+      const apiConfigResult = (await callApi("/promotion/api-config", { loadingMessage: "PromotionList の設定を読み込んでいます..." })).data;
+      if (apiConfigResult.status === "ok") {
+        state.promotionApiConfig = apiConfigResult.result;
+        ui.promotionIncludeImageInput.checked = !!state.promotionApiConfig.includeImageInResponse;
+      }
+    }
+
+    async function loadStatus() {
+      const result = (await callApi("/status", { loadingMessage: "設定情報を読み込んでいます..." })).data;
+      if (result.status !== "ok") return null;
+      ui.kpiEnabled.textContent = result.result.enabled ? "ON" : "OFF";
+      ui.kpiRpm.textContent = String(result.result.requestsPerMinute);
+      ui.kpiMaxChars.textContent = String(result.result.maxChars);
+      ui.enabledInput.value = result.result.enabled ? "1" : "0";
+      ui.rpmInput.value = String(result.result.requestsPerMinute);
+      ui.maxCharsInput.value = String(result.result.maxChars);
+      return result.result;
+    }
+
+    function upsertDayChart(day) {
+      const labels = ["Cache Hit", "Cache Miss", "AI Success", "AI Failure"];
+      const values = [day.cacheHits, day.cacheMisses, day.aiSuccesses, day.aiFailures];
+      if (!state.dayChart) {
+        state.dayChart = new Chart(ui.dayChartCanvas, { type: "line", data: { labels, datasets: [{ data: values, borderColor: "#8b5cf6", backgroundColor: "rgba(139,92,246,0.18)", fill: true, tension: 0.3 }] }, options: { responsive: true, plugins: { legend: { display: false } } } });
+        return;
+      }
+      state.dayChart.data.labels = labels;
+      state.dayChart.data.datasets[0].data = values;
+      state.dayChart.update();
+    }
+
+    function upsertLangChart(day) {
+      const entries = Object.entries(day.languages || {}).sort((a, b) => b[1] - a[1]).slice(0, 8);
+      const labels = entries.map((item) => item[0]);
+      const values = entries.map((item) => item[1]);
+      if (!state.langChart) {
+        state.langChart = new Chart(ui.langChartCanvas, { type: "bar", data: { labels, datasets: [{ data: values, backgroundColor: "#a78bfa" }] }, options: { responsive: true, plugins: { legend: { display: false } } } });
+        return;
+      }
+      state.langChart.data.labels = labels;
+      state.langChart.data.datasets[0].data = values;
+      state.langChart.update();
+    }
+
+    async function loadDashboard() {
+      setSectionLoading(ui.dayChartCanvas, ui.dashboardLoadingText, true, "Dashboard を読み込み中...");
+      setSectionLoading(ui.langChartCanvas, null, true);
+      try {
+        const status = await loadStatus();
+        const stats = (await callApi("/stats", { loadingMessage: "統計情報を読み込んでいます..." })).data;
+        if (stats.status === "ok" && status) {
+          upsertDayChart(stats.result.day);
+          upsertLangChart(stats.result.day);
+        }
+        await loadPromotionUsage();
+      } finally {
+        setSectionLoading(ui.dayChartCanvas, ui.dashboardLoadingText, false);
+        setSectionLoading(ui.langChartCanvas, null, false);
+      }
+    }
+
+    function createDocsLoader(targetElement, path, loadingMessage) {
+      return async function() {
+        setSectionLoading(targetElement, null, true);
+        targetElement.innerHTML = '<p class="text-[color:var(--mgr-muted)]">説明を読み込み中...</p>';
+        try {
+          const result = (await callApi(path, { loadingMessage })).data;
+          if (result.status === "ok") targetElement.innerHTML = result.result.body.map((line) => '<p>' + line + '</p>').join('');
+        } finally {
+          setSectionLoading(targetElement, null, false);
+        }
+      };
+    }
+
+    const panelLoaders = {
+      [PANEL_KEYS.dashboard]: loadDashboard,
+      [PANEL_KEYS.aiConfig]: loadStatus,
+      [PANEL_KEYS.promotionManage]: async () => await loadPromotionManageData(true),
+      [PANEL_KEYS.promotionApiSetting]: loadPromotionApiConfig,
+      [PANEL_KEYS.docsAi]: createDocsLoader(ui.docsAiBody, "/docs/ai", "AIサービスの説明を読み込んでいます..."),
+      [PANEL_KEYS.docsPromotion]: createDocsLoader(ui.docsPromotionBody, "/docs/promotion", "PromotionList の説明を読み込んでいます..."),
+    };
+
+    async function ensurePanelData(panelKey, forceReload) {
+      if (!forceReload && state.loadedPanels[panelKey]) return;
+      const loader = panelLoaders[panelKey];
+      if (!loader) return;
+      await loader();
+      state.loadedPanels[panelKey] = true;
+    }
+
+    async function refreshPromotionManagePanel() {
+      invalidatePanels(PANEL_KEYS.promotionManage, PANEL_KEYS.dashboard);
+      await ensurePanelData(PANEL_KEYS.promotionManage, true);
     }
 
     function resetPromotionForm() {
@@ -579,26 +679,35 @@ export const MANAGER_APP_SCRIPT = `
       state.promotionUploadedImageDataUrl = "";
     }
 
+    function fillPromotionForm(item) {
+      state.promotionEditingId = item.ID;
+      ui.promotionTypeInput.value = item.Type;
+      ui.promotionIdInput.value = item.ID;
+      ui.promotionTitleInput.value = item.Title;
+      ui.promotionAnchorInput.value = item.Anchor;
+      ui.promotionDescriptionInput.value = item.Description;
+      ui.promotionLinkInput.value = item.Link;
+      ui.promotionImageInput.value = item.Image;
+      setPromotionImagePreview(item.Image);
+      state.promotionUploadedImageDataUrl = "";
+    }
+
     function openPromotionModal(mode, item) {
       state.promotionModalMode = mode;
-      if (mode === "create") {
-        resetPromotionForm();
-        ui.promotionModalTitle.textContent = "PromotionList 追加";
-        ui.promotionIdInput.disabled = false;
-        ui.promotionTypeInput.value = ui.promotionFilterType.value;
-      } else {
-        ui.promotionModalTitle.textContent = "PromotionList 編集";
-        state.promotionEditingId = item.ID;
-        ui.promotionTypeInput.value = item.Type;
-        ui.promotionIdInput.value = item.ID;
-        ui.promotionIdInput.disabled = true;
-        ui.promotionTitleInput.value = item.Title;
-        ui.promotionAnchorInput.value = item.Anchor;
-        ui.promotionDescriptionInput.value = item.Description;
-        ui.promotionLinkInput.value = item.Link;
-        ui.promotionImageInput.value = item.Image;
-        setPromotionImagePreview(item.Image);
-        state.promotionUploadedImageDataUrl = "";
+      switch (mode) {
+        case PROMOTION_MODAL_MODE.create:
+          resetPromotionForm();
+          ui.promotionModalTitle.textContent = "PromotionList 追加";
+          ui.promotionIdInput.disabled = false;
+          ui.promotionTypeInput.value = ui.promotionFilterType.value;
+          break;
+        case PROMOTION_MODAL_MODE.edit:
+          ui.promotionModalTitle.textContent = "PromotionList 編集";
+          ui.promotionIdInput.disabled = true;
+          fillPromotionForm(item);
+          break;
+        default:
+          throw new Error("unsupported_promotion_modal_mode");
       }
       ui.promotionModal.classList.remove("hidden");
       refreshPromotionPrediction();
@@ -609,6 +718,38 @@ export const MANAGER_APP_SCRIPT = `
       resetPromotionForm();
     }
 
+    function buildPromotionSubmitRequest(payload, prediction) {
+      switch (state.promotionModalMode) {
+        case PROMOTION_MODAL_MODE.create:
+          setPromotionSubmitProgress(35, "追加データを送信しています...");
+          return {
+            path: "/promotion/items",
+            failureMessage: "追加に失敗しました。",
+            loadingMessage: "PromotionList 項目を追加しています...",
+            body: {
+              type: payload.type,
+              item: payload.item,
+              predictedBytes: prediction.predicted,
+            },
+          };
+        case PROMOTION_MODAL_MODE.edit:
+          setPromotionSubmitProgress(35, "更新データを送信しています...");
+          return {
+            path: "/promotion/items/update",
+            failureMessage: "更新に失敗しました。",
+            loadingMessage: "PromotionList 項目を更新しています...",
+            body: {
+              id: state.promotionEditingId,
+              type: payload.type,
+              item: payload.item,
+              predictedBytes: prediction.predicted,
+            },
+          };
+        default:
+          throw new Error("unsupported_promotion_modal_mode");
+      }
+    }
+
     async function submitPromotionModal() {
       const payload = readPromotionForm();
       const prediction = refreshPromotionPrediction();
@@ -616,193 +757,191 @@ export const MANAGER_APP_SCRIPT = `
         alert("予測サイズが 100MB を超えるため保存できません。");
         return;
       }
+
       beginPromotionSubmitProgress();
-      if (state.promotionModalMode === "create") {
-        setPromotionSubmitProgress(35, "追加データを送信しています...");
-        const result = (await callApi("/promotion/items", { method: "POST", body: JSON.stringify({ type: payload.type, item: payload.item, predictedBytes: prediction.predicted }), loadingMessage: "PromotionList 項目を追加しています..." })).data;
-        if (result.status !== "ok") {
-          endPromotionSubmitProgress();
-          alert("追加に失敗しました。");
-          return;
-        }
-      } else {
-        setPromotionSubmitProgress(35, "更新データを送信しています...");
-        const result = (await callApi("/promotion/items/update", { method: "POST", body: JSON.stringify({ id: state.promotionEditingId, type: payload.type, item: payload.item, predictedBytes: prediction.predicted }), loadingMessage: "PromotionList 項目を更新しています..." })).data;
-        if (result.status !== "ok") {
-          endPromotionSubmitProgress();
-          alert("更新に失敗しました。");
-          return;
-        }
+      const request = buildPromotionSubmitRequest(payload, prediction);
+      const result = (await callApi(request.path, { method: "POST", body: JSON.stringify(request.body), loadingMessage: request.loadingMessage })).data;
+      if (result.status !== "ok") {
+        endPromotionSubmitProgress();
+        alert(request.failureMessage);
+        return;
       }
+
       setPromotionSubmitProgress(75, "一覧を更新しています...");
-      await loadPromotionData();
+      await refreshPromotionManagePanel();
       setPromotionSubmitProgress(100, "完了しました。");
       closePromotionModal();
     }
 
-    async function loadDocs() {
-      setSectionLoading(ui.docsAiBody, null, true);
-      setSectionLoading(ui.docsPromotionBody, null, true);
-      ui.docsAiBody.innerHTML = '<p class="text-[color:var(--mgr-muted)]">説明を読み込み中...</p>';
-      ui.docsPromotionBody.innerHTML = '<p class="text-[color:var(--mgr-muted)]">説明を読み込み中...</p>';
-      try {
-        const aiDocs = (await callApi("/docs/ai", { loadingMessage: "AIサービスの説明を読み込んでいます..." })).data;
-        if (aiDocs.status === "ok") ui.docsAiBody.innerHTML = aiDocs.result.body.map((line) => '<p>' + line + '</p>').join('');
-        const promotionDocs = (await callApi("/docs/promotion", { loadingMessage: "PromotionList の説明を読み込んでいます..." })).data;
-        if (promotionDocs.status === "ok") ui.docsPromotionBody.innerHTML = promotionDocs.result.body.map((line) => '<p>' + line + '</p>').join('');
-      } finally {
-        setSectionLoading(ui.docsAiBody, null, false);
-        setSectionLoading(ui.docsPromotionBody, null, false);
-      }
+    function getPromotionItemById(id) {
+      return state.promotionItems.find((item) => item.ID === id) || null;
     }
 
-    async function loadStatus() {
-      const result = (await callApi("/status", { loadingMessage: "設定情報を読み込んでいます..." })).data;
-      if (result.status !== "ok") return null;
-      ui.kpiEnabled.textContent = result.result.enabled ? "ON" : "OFF";
-      ui.kpiRpm.textContent = String(result.result.requestsPerMinute);
-      ui.kpiMaxChars.textContent = String(result.result.maxChars);
-      ui.enabledInput.value = result.result.enabled ? "1" : "0";
-      ui.rpmInput.value = String(result.result.requestsPerMinute);
-      ui.maxCharsInput.value = String(result.result.maxChars);
-      return result.result;
+    function openPromotionPreviewById(id) {
+      const item = getPromotionItemById(id);
+      if (!item) return;
+      const source = getPromotionItemDataUrl(item);
+      if (!source) return;
+      ui.promotionImagePreviewLarge.src = source;
+      ui.promotionImagePreviewModal.classList.remove("hidden");
     }
 
-    async function loadDashboard() {
-      setSectionLoading(ui.dayChartCanvas, ui.dashboardLoadingText, true, "Dashboard を読み込み中...");
-      setSectionLoading(ui.langChartCanvas, null, true);
-      try {
-        const status = await loadStatus();
-        const stats = (await callApi("/stats", { loadingMessage: "統計情報を読み込んでいます..." })).data;
-        if (stats.status === "ok" && status) {
-          upsertDayChart(stats.result.day);
-          upsertLangChart(stats.result.day);
-        }
-        await loadPromotionData();
-      } finally {
-        setSectionLoading(ui.dayChartCanvas, ui.dashboardLoadingText, false);
-        setSectionLoading(ui.langChartCanvas, null, false);
-      }
+    async function deletePromotionItemById(id) {
+      if (!id || !confirm("ID " + id + " を削除しますか？")) return;
+      await callApi("/promotion/items/delete", { method: "POST", body: JSON.stringify({ id }), loadingMessage: "項目を削除しています..." });
+      await refreshPromotionManagePanel();
     }
 
-    ui.navItems.forEach((item) => item.addEventListener("click", () => switchPanel(item.dataset.panel)));
-    ui.logoutButton.addEventListener("click", () => { localStorage.removeItem("mgr_token"); location.href = "/mgr"; });
-    ui.refreshDashboardButton.addEventListener("click", async () => {
-      ui.refreshDashboardButton.disabled = true;
-      try {
-        await loadDashboard();
-      } finally {
-        ui.refreshDashboardButton.disabled = false;
+    function openPromotionEditorById(id) {
+      const item = getPromotionItemById(id);
+      if (!item) return;
+      openPromotionModal(PROMOTION_MODAL_MODE.edit, item);
+    }
+
+    async function handlePromotionListClick(event) {
+      const actionButton = event.target.closest("[data-promotion-delete], [data-promotion-preview], [data-promotion-edit]");
+      if (!actionButton) return;
+
+      const deleteId = actionButton.getAttribute("data-promotion-delete");
+      if (deleteId) {
+        await deletePromotionItemById(deleteId);
+        return;
       }
-    });
-    ui.saveConfigButton.addEventListener("click", async () => {
-      ui.saveConfigButton.disabled = true;
-      try {
+
+      const previewId = actionButton.getAttribute("data-promotion-preview");
+      if (previewId) {
+        openPromotionPreviewById(previewId);
+        return;
+      }
+
+      const editId = actionButton.getAttribute("data-promotion-edit");
+      if (editId) openPromotionEditorById(editId);
+    }
+
+    function bindNavigationEvents() {
+      ui.navItems.forEach((item) => item.addEventListener("click", async () => {
+        const panelKey = item.dataset.panel;
+        if (!panelKey) return;
+        await switchPanelAndLoad(panelKey, false);
+      }));
+      ui.logoutButton.addEventListener("click", () => {
+        localStorage.removeItem("mgr_token");
+        location.href = "/mgr";
+      });
+    }
+
+    function bindAiEvents() {
+      ui.refreshDashboardButton.addEventListener("click", async () => await withButtonDisabled(ui.refreshDashboardButton, async () => {
+        await switchPanelAndLoad(PANEL_KEYS.dashboard, true);
+      }));
+      ui.saveConfigButton.addEventListener("click", async () => await withButtonDisabled(ui.saveConfigButton, async () => {
         await callApi("/config", { method: "POST", body: JSON.stringify({ enabled: ui.enabledInput.value === "1", requestsPerMinute: Number(ui.rpmInput.value), maxChars: Number(ui.maxCharsInput.value) }), loadingMessage: "設定を保存しています..." });
-        await loadDashboard();
-      } finally {
-        ui.saveConfigButton.disabled = false;
-      }
-    });
-    ui.statsButton.addEventListener("click", async () => callApi("/stats", { loadingMessage: "統計情報を取得しています..." }));
-    ui.errorsButton.addEventListener("click", async () => callApi("/errors?limit=10", { loadingMessage: "エラーログを取得しています..." }));
-    ui.llmButton.addEventListener("click", async () => callApi("/llmrequests?limit=10", { loadingMessage: "LLMログを取得しています..." }));
-    ui.resetCacheButton.addEventListener("click", async () => confirm("translation_cache を全削除します。よろしいですか？") ? callApi("/resetcache", { method: "POST", body: "{}", loadingMessage: "翻訳キャッシュ削除を開始しています..." }) : null);
-    ui.pingButton.addEventListener("click", async () => callApi("/ping", { method: "POST", body: "{}", loadingMessage: "AI へ疎通確認しています..." }));
-    ui.simulateButton.addEventListener("click", async () => {
-      ui.simulateButton.disabled = true;
-      ui.simulateResultBox.classList.remove("hidden");
-      ui.simulateResultText.textContent = "実行中...";
-      try {
+        invalidatePanels(PANEL_KEYS.aiConfig, PANEL_KEYS.dashboard);
+        await ensurePanelData(PANEL_KEYS.aiConfig, true);
+        if (!ui.panels[PANEL_KEYS.dashboard].classList.contains("hidden")) await ensurePanelData(PANEL_KEYS.dashboard, true);
+      }));
+      ui.statsButton.addEventListener("click", async () => callApi("/stats", { loadingMessage: "統計情報を取得しています..." }));
+      ui.errorsButton.addEventListener("click", async () => callApi("/errors?limit=10", { loadingMessage: "エラーログを取得しています..." }));
+      ui.llmButton.addEventListener("click", async () => callApi("/llmrequests?limit=10", { loadingMessage: "LLMログを取得しています..." }));
+      ui.resetCacheButton.addEventListener("click", async () => confirm("translation_cache を全削除します。よろしいですか？") ? callApi("/resetcache", { method: "POST", body: "{}", loadingMessage: "翻訳キャッシュ削除を開始しています..." }) : null);
+      ui.pingButton.addEventListener("click", async () => callApi("/ping", { method: "POST", body: "{}", loadingMessage: "AI へ疎通確認しています..." }));
+      ui.simulateButton.addEventListener("click", async () => await withButtonDisabled(ui.simulateButton, async () => {
+        ui.simulateResultBox.classList.remove("hidden");
+        ui.simulateResultText.textContent = "実行中...";
         const result = await callApi("/simulate", { method: "POST", body: JSON.stringify({ lang: ui.simulateLangInput.value, text: ui.simulateTextInput.value }), loadingMessage: "simulate を実行しています..." });
         showSimulateResult(result.data);
-      } finally {
-        ui.simulateButton.disabled = false;
-      }
-    });
+      }));
+    }
 
-    ui.promotionCreateOpenButton.addEventListener("click", () => openPromotionModal("create"));
-    ui.promotionSortEditButton.addEventListener("click", () => {
-      state.promotionSortEditMode = true;
-      state.promotionSortDraftIds = state.promotionItems.map((item) => item.ID);
-      syncPromotionSortEditUi();
-      renderPromotionItems();
-    });
-    ui.promotionSortCancelButton.addEventListener("click", () => {
-      state.promotionSortEditMode = false;
-      state.promotionSortDraftIds = state.promotionItems.map((item) => item.ID);
-      syncPromotionSortEditUi();
-      renderPromotionItems();
-    });
-    ui.promotionSortSaveButton.addEventListener("click", async () => {
-      const payload = { type: ui.promotionFilterType.value, orderedIds: state.promotionSortDraftIds };
-      const result = (await callApi("/promotion/items/reorder", { method: "POST", body: JSON.stringify(payload), loadingMessage: "並び順を保存しています..." })).data;
-      if (result.status !== "ok") {
-        alert("並び順の保存に失敗しました。");
-        return;
-      }
-      state.promotionSortEditMode = false;
-      syncPromotionSortEditUi();
-      await loadPromotionData();
-    });
-    ui.promotionReloadButton.addEventListener("click", loadPromotionData);
-    ui.refreshPromotionUsageButton.addEventListener("click", loadPromotionData);
-    ui.promotionSaveApiSettingButton.addEventListener("click", async () => {
-      const includeImageInResponse = !!ui.promotionIncludeImageInput.checked;
-      const result = (await callApi("/promotion/api-config", { method: "POST", body: JSON.stringify({ includeImageInResponse }), loadingMessage: "API設定を保存しています..." })).data;
-      if (result.status !== "ok") {
-        alert("API設定の保存に失敗しました。");
-        return;
-      }
-      state.promotionApiConfig.includeImageInResponse = includeImageInResponse;
-      await loadPromotionData();
-    });
-    ui.promotionFilterType.addEventListener("change", () => {
-      state.promotionSortEditMode = false;
-      syncPromotionSortEditUi();
-      loadPromotionData();
-    });
-    ui.promotionModalCloseButton.addEventListener("click", closePromotionModal);
-    ui.promotionModalCancelButton.addEventListener("click", closePromotionModal);
-    ui.promotionModalSubmitButton.addEventListener("click", submitPromotionModal);
-    ui.promotionModal.addEventListener("click", (event) => { if (event.target === ui.promotionModal) closePromotionModal(); });
-    ui.promotionImagePreviewOpenButton.addEventListener("click", () => ui.promotionImagePreviewModal.classList.remove("hidden"));
-    ui.promotionImagePreviewCloseButton.addEventListener("click", () => ui.promotionImagePreviewModal.classList.add("hidden"));
-    ui.promotionImagePreviewModal.addEventListener("click", (event) => { if (event.target === ui.promotionImagePreviewModal) ui.promotionImagePreviewModal.classList.add("hidden"); });
-    ui.promotionImagePreviewContainer.addEventListener("mousemove", handlePromotionMagnifierMove);
-    ui.promotionImagePreviewContainer.addEventListener("mouseleave", hidePromotionMagnifier);
-    ui.promotionCompressEnabled.addEventListener("change", () => {
+    function bindPromotionEvents() {
+      ui.promotionItemsList.addEventListener("click", handlePromotionListClick);
+      ui.promotionCreateOpenButton.addEventListener("click", () => openPromotionModal(PROMOTION_MODAL_MODE.create));
+      ui.promotionSortEditButton.addEventListener("click", () => setPromotionSortEditMode(true));
+      ui.promotionSortCancelButton.addEventListener("click", () => setPromotionSortEditMode(false));
+      ui.promotionSortSaveButton.addEventListener("click", async () => {
+        const payload = { type: ui.promotionFilterType.value, orderedIds: state.promotionSortDraftIds };
+        const result = (await callApi("/promotion/items/reorder", { method: "POST", body: JSON.stringify(payload), loadingMessage: "並び順を保存しています..." })).data;
+        if (result.status !== "ok") {
+          alert("並び順の保存に失敗しました。");
+          return;
+        }
+        setPromotionSortEditMode(false);
+        await refreshPromotionManagePanel();
+      });
+      ui.promotionReloadButton.addEventListener("click", async () => {
+        invalidatePanels(PANEL_KEYS.promotionManage);
+        await ensurePanelData(PANEL_KEYS.promotionManage, true);
+      });
+      ui.refreshPromotionUsageButton.addEventListener("click", async () => {
+        await loadPromotionUsage();
+      });
+      ui.promotionSaveApiSettingButton.addEventListener("click", async () => {
+        const includeImageInResponse = !!ui.promotionIncludeImageInput.checked;
+        const result = (await callApi("/promotion/api-config", { method: "POST", body: JSON.stringify({ includeImageInResponse }), loadingMessage: "API設定を保存しています..." })).data;
+        if (result.status !== "ok") {
+          alert("API設定の保存に失敗しました。");
+          return;
+        }
+        state.promotionApiConfig.includeImageInResponse = includeImageInResponse;
+        invalidatePanels(PANEL_KEYS.promotionApiSetting);
+        await ensurePanelData(PANEL_KEYS.promotionApiSetting, true);
+      });
+      ui.promotionFilterType.addEventListener("change", async () => {
+        state.promotionSortEditMode = false;
+        syncPromotionSortEditUi();
+        await loadPromotionItems();
+      });
+      ui.promotionModalCloseButton.addEventListener("click", closePromotionModal);
+      ui.promotionModalCancelButton.addEventListener("click", closePromotionModal);
+      ui.promotionModalSubmitButton.addEventListener("click", submitPromotionModal);
+      ui.promotionModal.addEventListener("click", (event) => {
+        if (event.target === ui.promotionModal) closePromotionModal();
+      });
+      ui.promotionImagePreviewOpenButton.addEventListener("click", () => ui.promotionImagePreviewModal.classList.remove("hidden"));
+      ui.promotionImagePreviewCloseButton.addEventListener("click", () => ui.promotionImagePreviewModal.classList.add("hidden"));
+      ui.promotionImagePreviewModal.addEventListener("click", (event) => {
+        if (event.target === ui.promotionImagePreviewModal) ui.promotionImagePreviewModal.classList.add("hidden");
+      });
+      ui.promotionImagePreviewContainer.addEventListener("mousemove", handlePromotionMagnifierMove);
+      ui.promotionImagePreviewContainer.addEventListener("mouseleave", hidePromotionMagnifier);
+      ui.promotionCompressEnabled.addEventListener("change", () => {
+        updatePromotionImageSizeWarning();
+        reapplyImageCompression();
+      });
+      ui.promotionCompressMaxSize.addEventListener("change", () => {
+        updatePromotionImageSizeWarning();
+        reapplyImageCompression();
+      });
+      ui.promotionImageFileInput.addEventListener("change", async () => {
+        const file = ui.promotionImageFileInput.files && ui.promotionImageFileInput.files[0];
+        if (!file) return;
+        beginGlobalLoading("画像を読み込んでいます...");
+        try {
+          state.promotionUploadedImageDataUrl = await fileToDataUrl(file);
+          state.globalLoadingMessage = "画像を圧縮しています...";
+          await reapplyImageCompression();
+        } catch (error) {
+          console.error("[mgr] 画像読込に失敗しました", error);
+        } finally {
+          endGlobalLoading();
+        }
+      });
+      [ui.promotionTypeInput, ui.promotionTitleInput, ui.promotionAnchorInput, ui.promotionDescriptionInput, ui.promotionLinkInput, ui.promotionImageInput].forEach((input) => input.addEventListener("input", () => {
+        if (input === ui.promotionImageInput) setPromotionImagePreview(ui.promotionImageInput.value);
+        refreshPromotionPrediction();
+      }));
+      ui.promotionIdInput.addEventListener("input", refreshPromotionPrediction);
+    }
+
+    function initializePage() {
+      bindNavigationEvents();
+      bindAiEvents();
+      bindPromotionEvents();
       updatePromotionImageSizeWarning();
-      reapplyImageCompression();
-    });
-    ui.promotionCompressMaxSize.addEventListener("change", () => {
-      updatePromotionImageSizeWarning();
-      reapplyImageCompression();
-    });
+      syncPromotionSortEditUi();
+      switchPanel(PANEL_KEYS.dashboard);
+      ensurePanelData(PANEL_KEYS.dashboard, false);
+    }
 
-    ui.promotionImageFileInput.addEventListener("change", async () => {
-      const file = ui.promotionImageFileInput.files && ui.promotionImageFileInput.files[0];
-      if (!file) return;
-      beginGlobalLoading("画像を読み込んでいます...");
-      try {
-        state.promotionUploadedImageDataUrl = await fileToDataUrl(file);
-        state.globalLoadingMessage = "画像を圧縮しています...";
-        await reapplyImageCompression();
-      } catch (error) {
-        console.error("[mgr] 画像読込に失敗しました", error);
-      } finally {
-        endGlobalLoading();
-      }
-    });
-    [ui.promotionTypeInput, ui.promotionTitleInput, ui.promotionAnchorInput, ui.promotionDescriptionInput, ui.promotionLinkInput, ui.promotionImageInput].forEach((input) => input.addEventListener("input", () => {
-      if (input === ui.promotionImageInput) setPromotionImagePreview(ui.promotionImageInput.value);
-      refreshPromotionPrediction();
-    }));
-    ui.promotionIdInput.addEventListener("input", refreshPromotionPrediction);
-    updatePromotionImageSizeWarning();
-    syncPromotionSortEditUi();
-
-    switchPanel("dashboard");
-    loadDashboard();
-    loadDocs();
+    initializePage();
 `;

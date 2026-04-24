@@ -50,7 +50,7 @@ export const MANAGER_COMMON_STYLE = `
       padding: 16px;
     }
     .loading-overlay {
-      position: fixed;
+      position: absolute;
       inset: 0;
       display: flex;
       align-items: center;
@@ -60,6 +60,7 @@ export const MANAGER_COMMON_STYLE = `
       z-index: 80;
       padding: 16px;
       transition: opacity 0.18s ease;
+      border-radius: 16px;
     }
     .loading-overlay.hidden {
       opacity: 0;

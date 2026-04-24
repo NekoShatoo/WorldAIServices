@@ -163,4 +163,10 @@ PromotionList 仕様
 - 管理画面の各種 API 呼び出しに共通ローディングオーバーレイを追加し、ログイン・Dashboard読込・設定保存・simulate・PromotionList 一覧取得/保存/削除/並び替え/API設定更新・説明文読込の待機中に必ず状態文言を表示するようにした
 - Dashboard と PromotionList 一覧、説明文エリアには局所的な読込表示も追加し、全画面オーバーレイだけでなく「どの領域が更新中か」も見えるようにした
 - 画像アップロード時は Base64 化と再圧縮の間もローディング表示を維持し、重い画像で無反応に見えないようにした
+- 管理画面の初期表示では Dashboard 用データのみ取得し、他の設定・PromotionList 一覧・説明文は対応タブを開いた時点で初回読込する遅延取得に変更した
+- 右ペインのローディングオーバーレイは `main` のみを覆う配置に変更し、左側の Tree View は常に操作可能なままにした
+- 説明ページも AI / PromotionList を別々に取得するように分離し、片方を開いただけで他方の API を呼ばないようにした
+- `src/managerAppScript.ts` を整理し、面板読込は `panelLoaders` の対応表で分配、Promotion 追加/更新は `buildPromotionSubmitRequest()` で共通化、一覧内の編集/削除/画像プレビューは個別バインドではなくイベント委譲へ変更した
+- 初期化処理は `bindNavigationEvents()` / `bindAiEvents()` / `bindPromotionEvents()` / `initializePage()` に分割し、後半のイベント登録が一塊で読みにくい状態を解消した
+- `withButtonDisabled()` / `invalidatePanels()` / `refreshPromotionManagePanel()` などの小さな共通関数を追加し、同じ disable/reload/invalidate 手順の重複を減らした
 - 今回の `npx tsc --noEmit` では既存の `src/types.ts` の Durable Object 型エラー（`TranslationCoordinator` が `DurableObjectBranded` 制約を満たさない）が残っており、この変更起因の新規エラーは確認されなかった

@@ -26,7 +26,7 @@ export function buildManagerAppPageHtml() {
       <button id="logoutButton" class="mt-3 px-3 py-2 rounded-lg bg-violet-100 text-violet-700 text-sm font-semibold">ログアウト</button>
     </aside>
 
-    <main class="col-span-12 md:col-span-9 lg:col-span-10 space-y-4">
+    <main id="managerMainContent" class="relative col-span-12 md:col-span-9 lg:col-span-10 space-y-4">
       <section id="panel-dashboard" class="card p-5 space-y-4">
         <div class="flex items-center justify-between"><h2 class="text-xl font-bold">Dashboard</h2><button id="refreshDashboardButton" class="px-3 py-2 rounded-xl bg-violet-100 text-violet-700 text-sm font-semibold">更新</button></div>
         <p id="dashboardLoadingText" class="hidden text-xs text-[color:var(--mgr-muted)]">Dashboard を読み込み中...</p>
@@ -118,17 +118,16 @@ export function buildManagerAppPageHtml() {
 
       <section id="panel-docs-ai" class="card p-5 hidden"><h2 class="text-xl font-bold mb-3">AIサービス 説明ページ</h2><div id="docsAiBody" class="text-sm space-y-1 text-[color:var(--mgr-text)]"></div></section>
       <section id="panel-docs-promotion" class="card p-5 hidden"><h2 class="text-xl font-bold mb-3">PromotionList 説明ページ</h2><div id="docsPromotionBody" class="text-sm space-y-1 text-[color:var(--mgr-text)]"></div></section>
-    </main>
-  </div>
-
-  <div id="globalLoadingOverlay" class="loading-overlay hidden" aria-live="polite" aria-busy="true">
-    <div class="card w-full max-w-sm p-5 flex items-center gap-4">
-      <div class="loading-spinner flex-shrink-0"></div>
-      <div class="min-w-0">
-        <p class="text-sm font-semibold">処理中</p>
-        <p id="globalLoadingText" class="text-sm text-[color:var(--mgr-muted)]">読み込み中...</p>
+      <div id="globalLoadingOverlay" class="loading-overlay hidden" aria-live="polite" aria-busy="true">
+        <div class="card w-full max-w-sm p-5 flex items-center gap-4">
+          <div class="loading-spinner flex-shrink-0"></div>
+          <div class="min-w-0">
+            <p class="text-sm font-semibold">処理中</p>
+            <p id="globalLoadingText" class="text-sm text-[color:var(--mgr-muted)]">読み込み中...</p>
+          </div>
+        </div>
       </div>
-    </div>
+    </main>
   </div>
 
   <div id="promotionModal" class="modal-backdrop hidden">
