@@ -49,6 +49,50 @@ export const MANAGER_COMMON_STYLE = `
       z-index: 40;
       padding: 16px;
     }
+    .loading-overlay {
+      position: fixed;
+      inset: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: rgba(35, 20, 60, 0.34);
+      backdrop-filter: blur(3px);
+      z-index: 80;
+      padding: 16px;
+      transition: opacity 0.18s ease;
+    }
+    .loading-overlay.hidden {
+      opacity: 0;
+      pointer-events: none;
+    }
+    .loading-spinner {
+      width: 52px;
+      height: 52px;
+      border-radius: 999px;
+      border: 4px solid #d9c8ff;
+      border-top-color: #7c3aed;
+      animation: mgr-spin 0.85s linear infinite;
+    }
+    .section-loading {
+      position: relative;
+      min-height: 120px;
+    }
+    .section-loading::after {
+      content: "";
+      position: absolute;
+      inset: 0;
+      background: linear-gradient(90deg, rgba(255,255,255,0.24) 0%, rgba(255,255,255,0.52) 50%, rgba(255,255,255,0.24) 100%);
+      animation: mgr-shimmer 1.1s linear infinite;
+      pointer-events: none;
+    }
+    @keyframes mgr-spin {
+      from { transform: rotate(0deg); }
+      to { transform: rotate(360deg); }
+    }
+    @keyframes mgr-shimmer {
+      from { transform: translateX(-100%); }
+      to { transform: translateX(100%); }
+    }
   </style>
 
 `;

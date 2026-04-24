@@ -2,6 +2,8 @@ export const MANAGER_APP_SCRIPT = `
     const MAX_PROMOTION_BYTES = 100 * 1024 * 1024;
     const state = {
       token: localStorage.getItem("mgr_token") || "",
+      globalLoadingCount: 0,
+      globalLoadingMessage: "",
       dayChart: null,
       langChart: null,
       promotionUsage: { usedBytes: 0, maxBytes: MAX_PROMOTION_BYTES, usedPercent: 0 },
@@ -41,6 +43,7 @@ export const MANAGER_APP_SCRIPT = `
       simulateResultText: document.getElementById("simulateResultText"),
       dayChartCanvas: document.getElementById("dayChart"),
       langChartCanvas: document.getElementById("langChart"),
+      dashboardLoadingText: document.getElementById("dashboardLoadingText"),
       navItems: Array.from(document.querySelectorAll(".nav-item")),
       panels: {
         dashboard: document.getElementById("panel-dashboard"),
@@ -55,6 +58,7 @@ export const MANAGER_APP_SCRIPT = `
       refreshPromotionUsageButton: document.getElementById("refreshPromotionUsageButton"),
       promotionUsageBar: document.getElementById("promotionUsageBar"),
       promotionUsageText: document.getElementById("promotionUsageText"),
+      promotionLoadingText: document.getElementById("promotionLoadingText"),
       promotionItemsList: document.getElementById("promotionItemsList"),
       promotionCreateOpenButton: document.getElementById("promotionCreateOpenButton"),
       promotionReloadButton: document.getElementById("promotionReloadButton"),
@@ -94,6 +98,8 @@ export const MANAGER_APP_SCRIPT = `
       promotionImagePreviewModal: document.getElementById("promotionImagePreviewModal"),
       promotionImagePreviewLarge: document.getElementById("promotionImagePreviewLarge"),
       promotionImagePreviewCloseButton: document.getElementById("promotionImagePreviewCloseButton"),
+      globalLoadingOverlay: document.getElementById("globalLoadingOverlay"),
+      globalLoadingText: document.getElementById("globalLoadingText"),
     };
 
     function getPromotionItemDataUrl(item) {
@@ -108,16 +114,55 @@ export const MANAGER_APP_SCRIPT = `
       for (const item of ui.navItems) item.classList.toggle("active", item.dataset.panel === panelKey);
     }
 
-    async function callApi(path, options = {}) {
-      const headers = Object.assign({ "content-type": "application/json", authorization: "Bearer " + state.token }, options.headers || {});
-      const response = await fetch("/mgr/api" + path, Object.assign({}, options, { headers }));
-      const data = await response.json().catch(() => ({ status: "error", result: "Invalid JSON" }));
-      if (response.status === 401) {
-        localStorage.removeItem("mgr_token");
-        location.href = "/mgr";
+    function setGlobalLoadingVisible(visible) {
+      ui.globalLoadingOverlay.classList.toggle("hidden", !visible);
+      ui.globalLoadingText.textContent = state.globalLoadingMessage || "読み込み中...";
+    }
+
+    function beginGlobalLoading(message) {
+      state.globalLoadingCount += 1;
+      state.globalLoadingMessage = message || state.globalLoadingMessage || "読み込み中...";
+      setGlobalLoadingVisible(true);
+    }
+
+    function endGlobalLoading() {
+      state.globalLoadingCount = Math.max(0, state.globalLoadingCount - 1);
+      if (state.globalLoadingCount > 0) {
+        setGlobalLoadingVisible(true);
+        return;
       }
-      if (data.status !== "ok") console.error("[mgr]", path, data);
-      return { response, data };
+      state.globalLoadingMessage = "";
+      setGlobalLoadingVisible(false);
+    }
+
+    function setSectionLoading(element, loadingTextElement, loading, text) {
+      if (element) element.classList.toggle("section-loading", !!loading);
+      if (!loadingTextElement) return;
+      loadingTextElement.classList.toggle("hidden", !loading);
+      if (loading && text) loadingTextElement.textContent = text;
+    }
+
+    async function callApi(path, options = {}) {
+      const requestOptions = Object.assign({}, options);
+      const loadingMessage = requestOptions.loadingMessage || "読み込み中...";
+      const skipGlobalLoading = !!requestOptions.skipGlobalLoading;
+      delete requestOptions.loadingMessage;
+      delete requestOptions.skipGlobalLoading;
+
+      const headers = Object.assign({ "content-type": "application/json", authorization: "Bearer " + state.token }, requestOptions.headers || {});
+      if (!skipGlobalLoading) beginGlobalLoading(loadingMessage);
+      try {
+        const response = await fetch("/mgr/api" + path, Object.assign({}, requestOptions, { headers }));
+        const data = await response.json().catch(() => ({ status: "error", result: "Invalid JSON" }));
+        if (response.status === 401) {
+          localStorage.removeItem("mgr_token");
+          location.href = "/mgr";
+        }
+        if (data.status !== "ok") console.error("[mgr]", path, data);
+        return { response, data };
+      } finally {
+        if (!skipGlobalLoading) endGlobalLoading();
+      }
     }
 
     function showSimulateResult(data) {
@@ -349,7 +394,7 @@ export const MANAGER_APP_SCRIPT = `
         button.addEventListener("click", async () => {
           const id = button.getAttribute("data-promotion-delete");
           if (!id || !confirm("ID " + id + " を削除しますか？")) return;
-          await callApi("/promotion/items/delete", { method: "POST", body: JSON.stringify({ id }) });
+          await callApi("/promotion/items/delete", { method: "POST", body: JSON.stringify({ id }), loadingMessage: "項目を削除しています..." });
           await loadPromotionData();
         });
       });
@@ -492,22 +537,27 @@ export const MANAGER_APP_SCRIPT = `
     }
 
     async function loadPromotionData() {
-      const apiConfigResult = (await callApi("/promotion/api-config")).data;
-      if (apiConfigResult.status === "ok") {
-        state.promotionApiConfig = apiConfigResult.result;
-        ui.promotionIncludeImageInput.checked = !!state.promotionApiConfig.includeImageInResponse;
-      }
-      const usageResult = (await callApi("/promotion/usage")).data;
-      if (usageResult.status === "ok") {
-        state.promotionUsage = usageResult.result;
-        renderPromotionUsage();
-      }
-      const selectedType = ui.promotionFilterType.value;
-      const itemsResult = (await callApi("/promotion/items?type=" + encodeURIComponent(selectedType))).data;
-      if (itemsResult.status === "ok") {
-        state.promotionItems = itemsResult.result;
-        if (!state.promotionSortEditMode) state.promotionSortDraftIds = state.promotionItems.map((item) => item.ID);
-        renderPromotionItems();
+      setSectionLoading(ui.promotionItemsList, ui.promotionLoadingText, true, "一覧を読み込み中...");
+      try {
+        const apiConfigResult = (await callApi("/promotion/api-config", { loadingMessage: "PromotionList の設定を読み込んでいます..." })).data;
+        if (apiConfigResult.status === "ok") {
+          state.promotionApiConfig = apiConfigResult.result;
+          ui.promotionIncludeImageInput.checked = !!state.promotionApiConfig.includeImageInResponse;
+        }
+        const usageResult = (await callApi("/promotion/usage", { loadingMessage: "PromotionList の使用率を計算しています..." })).data;
+        if (usageResult.status === "ok") {
+          state.promotionUsage = usageResult.result;
+          renderPromotionUsage();
+        }
+        const selectedType = ui.promotionFilterType.value;
+        const itemsResult = (await callApi("/promotion/items?type=" + encodeURIComponent(selectedType), { loadingMessage: selectedType + " の一覧を読み込んでいます..." })).data;
+        if (itemsResult.status === "ok") {
+          state.promotionItems = itemsResult.result;
+          if (!state.promotionSortEditMode) state.promotionSortDraftIds = state.promotionItems.map((item) => item.ID);
+          renderPromotionItems();
+        }
+      } finally {
+        setSectionLoading(ui.promotionItemsList, ui.promotionLoadingText, false);
       }
     }
 
@@ -569,7 +619,7 @@ export const MANAGER_APP_SCRIPT = `
       beginPromotionSubmitProgress();
       if (state.promotionModalMode === "create") {
         setPromotionSubmitProgress(35, "追加データを送信しています...");
-        const result = (await callApi("/promotion/items", { method: "POST", body: JSON.stringify({ type: payload.type, item: payload.item, predictedBytes: prediction.predicted }) })).data;
+        const result = (await callApi("/promotion/items", { method: "POST", body: JSON.stringify({ type: payload.type, item: payload.item, predictedBytes: prediction.predicted }), loadingMessage: "PromotionList 項目を追加しています..." })).data;
         if (result.status !== "ok") {
           endPromotionSubmitProgress();
           alert("追加に失敗しました。");
@@ -577,7 +627,7 @@ export const MANAGER_APP_SCRIPT = `
         }
       } else {
         setPromotionSubmitProgress(35, "更新データを送信しています...");
-        const result = (await callApi("/promotion/items/update", { method: "POST", body: JSON.stringify({ id: state.promotionEditingId, type: payload.type, item: payload.item, predictedBytes: prediction.predicted }) })).data;
+        const result = (await callApi("/promotion/items/update", { method: "POST", body: JSON.stringify({ id: state.promotionEditingId, type: payload.type, item: payload.item, predictedBytes: prediction.predicted }), loadingMessage: "PromotionList 項目を更新しています..." })).data;
         if (result.status !== "ok") {
           endPromotionSubmitProgress();
           alert("更新に失敗しました。");
@@ -591,14 +641,23 @@ export const MANAGER_APP_SCRIPT = `
     }
 
     async function loadDocs() {
-      const aiDocs = (await callApi("/docs/ai")).data;
-      if (aiDocs.status === "ok") ui.docsAiBody.innerHTML = aiDocs.result.body.map((line) => '<p>' + line + '</p>').join('');
-      const promotionDocs = (await callApi("/docs/promotion")).data;
-      if (promotionDocs.status === "ok") ui.docsPromotionBody.innerHTML = promotionDocs.result.body.map((line) => '<p>' + line + '</p>').join('');
+      setSectionLoading(ui.docsAiBody, null, true);
+      setSectionLoading(ui.docsPromotionBody, null, true);
+      ui.docsAiBody.innerHTML = '<p class="text-[color:var(--mgr-muted)]">説明を読み込み中...</p>';
+      ui.docsPromotionBody.innerHTML = '<p class="text-[color:var(--mgr-muted)]">説明を読み込み中...</p>';
+      try {
+        const aiDocs = (await callApi("/docs/ai", { loadingMessage: "AIサービスの説明を読み込んでいます..." })).data;
+        if (aiDocs.status === "ok") ui.docsAiBody.innerHTML = aiDocs.result.body.map((line) => '<p>' + line + '</p>').join('');
+        const promotionDocs = (await callApi("/docs/promotion", { loadingMessage: "PromotionList の説明を読み込んでいます..." })).data;
+        if (promotionDocs.status === "ok") ui.docsPromotionBody.innerHTML = promotionDocs.result.body.map((line) => '<p>' + line + '</p>').join('');
+      } finally {
+        setSectionLoading(ui.docsAiBody, null, false);
+        setSectionLoading(ui.docsPromotionBody, null, false);
+      }
     }
 
     async function loadStatus() {
-      const result = (await callApi("/status")).data;
+      const result = (await callApi("/status", { loadingMessage: "設定情報を読み込んでいます..." })).data;
       if (result.status !== "ok") return null;
       ui.kpiEnabled.textContent = result.result.enabled ? "ON" : "OFF";
       ui.kpiRpm.textContent = String(result.result.requestsPerMinute);
@@ -610,34 +669,56 @@ export const MANAGER_APP_SCRIPT = `
     }
 
     async function loadDashboard() {
-      const status = await loadStatus();
-      const stats = (await callApi("/stats")).data;
-      if (stats.status === "ok" && status) {
-        upsertDayChart(stats.result.day);
-        upsertLangChart(stats.result.day);
+      setSectionLoading(ui.dayChartCanvas, ui.dashboardLoadingText, true, "Dashboard を読み込み中...");
+      setSectionLoading(ui.langChartCanvas, null, true);
+      try {
+        const status = await loadStatus();
+        const stats = (await callApi("/stats", { loadingMessage: "統計情報を読み込んでいます..." })).data;
+        if (stats.status === "ok" && status) {
+          upsertDayChart(stats.result.day);
+          upsertLangChart(stats.result.day);
+        }
+        await loadPromotionData();
+      } finally {
+        setSectionLoading(ui.dayChartCanvas, ui.dashboardLoadingText, false);
+        setSectionLoading(ui.langChartCanvas, null, false);
       }
-      await loadPromotionData();
     }
 
     ui.navItems.forEach((item) => item.addEventListener("click", () => switchPanel(item.dataset.panel)));
     ui.logoutButton.addEventListener("click", () => { localStorage.removeItem("mgr_token"); location.href = "/mgr"; });
-    ui.refreshDashboardButton.addEventListener("click", loadDashboard);
-    ui.saveConfigButton.addEventListener("click", async () => {
-      await callApi("/config", { method: "POST", body: JSON.stringify({ enabled: ui.enabledInput.value === "1", requestsPerMinute: Number(ui.rpmInput.value), maxChars: Number(ui.maxCharsInput.value) }) });
-      await loadDashboard();
+    ui.refreshDashboardButton.addEventListener("click", async () => {
+      ui.refreshDashboardButton.disabled = true;
+      try {
+        await loadDashboard();
+      } finally {
+        ui.refreshDashboardButton.disabled = false;
+      }
     });
-    ui.statsButton.addEventListener("click", async () => callApi("/stats"));
-    ui.errorsButton.addEventListener("click", async () => callApi("/errors?limit=10"));
-    ui.llmButton.addEventListener("click", async () => callApi("/llmrequests?limit=10"));
-    ui.resetCacheButton.addEventListener("click", async () => confirm("translation_cache を全削除します。よろしいですか？") ? callApi("/resetcache", { method: "POST", body: "{}" }) : null);
-    ui.pingButton.addEventListener("click", async () => callApi("/ping", { method: "POST", body: "{}" }));
+    ui.saveConfigButton.addEventListener("click", async () => {
+      ui.saveConfigButton.disabled = true;
+      try {
+        await callApi("/config", { method: "POST", body: JSON.stringify({ enabled: ui.enabledInput.value === "1", requestsPerMinute: Number(ui.rpmInput.value), maxChars: Number(ui.maxCharsInput.value) }), loadingMessage: "設定を保存しています..." });
+        await loadDashboard();
+      } finally {
+        ui.saveConfigButton.disabled = false;
+      }
+    });
+    ui.statsButton.addEventListener("click", async () => callApi("/stats", { loadingMessage: "統計情報を取得しています..." }));
+    ui.errorsButton.addEventListener("click", async () => callApi("/errors?limit=10", { loadingMessage: "エラーログを取得しています..." }));
+    ui.llmButton.addEventListener("click", async () => callApi("/llmrequests?limit=10", { loadingMessage: "LLMログを取得しています..." }));
+    ui.resetCacheButton.addEventListener("click", async () => confirm("translation_cache を全削除します。よろしいですか？") ? callApi("/resetcache", { method: "POST", body: "{}", loadingMessage: "翻訳キャッシュ削除を開始しています..." }) : null);
+    ui.pingButton.addEventListener("click", async () => callApi("/ping", { method: "POST", body: "{}", loadingMessage: "AI へ疎通確認しています..." }));
     ui.simulateButton.addEventListener("click", async () => {
       ui.simulateButton.disabled = true;
       ui.simulateResultBox.classList.remove("hidden");
       ui.simulateResultText.textContent = "実行中...";
-      const result = await callApi("/simulate", { method: "POST", body: JSON.stringify({ lang: ui.simulateLangInput.value, text: ui.simulateTextInput.value }) });
-      showSimulateResult(result.data);
-      ui.simulateButton.disabled = false;
+      try {
+        const result = await callApi("/simulate", { method: "POST", body: JSON.stringify({ lang: ui.simulateLangInput.value, text: ui.simulateTextInput.value }), loadingMessage: "simulate を実行しています..." });
+        showSimulateResult(result.data);
+      } finally {
+        ui.simulateButton.disabled = false;
+      }
     });
 
     ui.promotionCreateOpenButton.addEventListener("click", () => openPromotionModal("create"));
@@ -655,7 +736,7 @@ export const MANAGER_APP_SCRIPT = `
     });
     ui.promotionSortSaveButton.addEventListener("click", async () => {
       const payload = { type: ui.promotionFilterType.value, orderedIds: state.promotionSortDraftIds };
-      const result = (await callApi("/promotion/items/reorder", { method: "POST", body: JSON.stringify(payload) })).data;
+      const result = (await callApi("/promotion/items/reorder", { method: "POST", body: JSON.stringify(payload), loadingMessage: "並び順を保存しています..." })).data;
       if (result.status !== "ok") {
         alert("並び順の保存に失敗しました。");
         return;
@@ -668,7 +749,7 @@ export const MANAGER_APP_SCRIPT = `
     ui.refreshPromotionUsageButton.addEventListener("click", loadPromotionData);
     ui.promotionSaveApiSettingButton.addEventListener("click", async () => {
       const includeImageInResponse = !!ui.promotionIncludeImageInput.checked;
-      const result = (await callApi("/promotion/api-config", { method: "POST", body: JSON.stringify({ includeImageInResponse }) })).data;
+      const result = (await callApi("/promotion/api-config", { method: "POST", body: JSON.stringify({ includeImageInResponse }), loadingMessage: "API設定を保存しています..." })).data;
       if (result.status !== "ok") {
         alert("API設定の保存に失敗しました。");
         return;
@@ -702,12 +783,16 @@ export const MANAGER_APP_SCRIPT = `
     ui.promotionImageFileInput.addEventListener("change", async () => {
       const file = ui.promotionImageFileInput.files && ui.promotionImageFileInput.files[0];
       if (!file) return;
+      beginGlobalLoading("画像を読み込んでいます...");
       try {
         state.promotionUploadedImageDataUrl = await fileToDataUrl(file);
+        state.globalLoadingMessage = "画像を圧縮しています...";
+        await reapplyImageCompression();
       } catch (error) {
         console.error("[mgr] 画像読込に失敗しました", error);
+      } finally {
+        endGlobalLoading();
       }
-      await reapplyImageCompression();
     });
     [ui.promotionTypeInput, ui.promotionTitleInput, ui.promotionAnchorInput, ui.promotionDescriptionInput, ui.promotionLinkInput, ui.promotionImageInput].forEach((input) => input.addEventListener("input", () => {
       if (input === ui.promotionImageInput) setPromotionImagePreview(ui.promotionImageInput.value);

@@ -29,6 +29,7 @@ export function buildManagerAppPageHtml() {
     <main class="col-span-12 md:col-span-9 lg:col-span-10 space-y-4">
       <section id="panel-dashboard" class="card p-5 space-y-4">
         <div class="flex items-center justify-between"><h2 class="text-xl font-bold">Dashboard</h2><button id="refreshDashboardButton" class="px-3 py-2 rounded-xl bg-violet-100 text-violet-700 text-sm font-semibold">更新</button></div>
+        <p id="dashboardLoadingText" class="hidden text-xs text-[color:var(--mgr-muted)]">Dashboard を読み込み中...</p>
         <div class="grid md:grid-cols-4 gap-3">
           <div class="card p-3"><p class="text-xs text-[color:var(--mgr-muted)]">AI サービス状態</p><p id="kpiEnabled" class="text-lg font-bold">-</p></div>
           <div class="card p-3"><p class="text-xs text-[color:var(--mgr-muted)]">1分上限</p><p id="kpiRpm" class="text-lg font-bold">-</p></div>
@@ -97,7 +98,10 @@ export function buildManagerAppPageHtml() {
           <p id="promotionUsageText" class="text-xs text-[color:var(--mgr-muted)]">0 / 100MB</p>
         </div>
         <div class="card p-3">
-          <h3 class="text-sm font-semibold mb-2">登録済み項目</h3>
+          <div class="flex items-center justify-between gap-2 mb-2">
+            <h3 class="text-sm font-semibold">登録済み項目</h3>
+            <p id="promotionLoadingText" class="hidden text-xs text-[color:var(--mgr-muted)]">一覧を読み込み中...</p>
+          </div>
           <div id="promotionItemsList" class="space-y-2 text-sm max-h-[28rem] overflow-y-auto pr-1"></div>
         </div>
       </section>
@@ -115,6 +119,16 @@ export function buildManagerAppPageHtml() {
       <section id="panel-docs-ai" class="card p-5 hidden"><h2 class="text-xl font-bold mb-3">AIサービス 説明ページ</h2><div id="docsAiBody" class="text-sm space-y-1 text-[color:var(--mgr-text)]"></div></section>
       <section id="panel-docs-promotion" class="card p-5 hidden"><h2 class="text-xl font-bold mb-3">PromotionList 説明ページ</h2><div id="docsPromotionBody" class="text-sm space-y-1 text-[color:var(--mgr-text)]"></div></section>
     </main>
+  </div>
+
+  <div id="globalLoadingOverlay" class="loading-overlay hidden" aria-live="polite" aria-busy="true">
+    <div class="card w-full max-w-sm p-5 flex items-center gap-4">
+      <div class="loading-spinner flex-shrink-0"></div>
+      <div class="min-w-0">
+        <p class="text-sm font-semibold">処理中</p>
+        <p id="globalLoadingText" class="text-sm text-[color:var(--mgr-muted)]">読み込み中...</p>
+      </div>
+    </div>
   </div>
 
   <div id="promotionModal" class="modal-backdrop hidden">
