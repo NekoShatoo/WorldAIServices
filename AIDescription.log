@@ -191,4 +191,7 @@ PromotionList 仕様
 - PromotionList の公開キャッシュは 1 個の bundle JSON ではなく `pc / android / ios` の独立キャッシュへ分割した。単一プラットフォーム変換時は対象プラットフォーム分だけ再生成し、他プラットフォームの巨大 Base64 JSON を毎回再構築しない
 - PromotionList 使用率はキャッシュ本文の `JSON.parse` / `JSON.stringify` で再計算せず、プラットフォーム別キャッシュメタデータの `payload_bytes` を直接読むように変更した
 - 互換性のため、分割キャッシュ未生成時は旧 `promotion_list_cache_chunks` の bundle JSON を一時的に参照するフォールバックも残した。新 migration 適用後に一度更新処理が走れば以後は分割キャッシュ側のみで動作する
+- 既存 migration SQL は手動適用済み前提のため、増分 0001-0009 は削除して `migrations/0001_schema_baseline.sql` へ統合した
+- baseline は最終スキーマだけを `CREATE TABLE IF NOT EXISTS` / `CREATE INDEX IF NOT EXISTS` / `INSERT OR IGNORE` で表現し、今後の新規環境構築を 1 ファイルで完了できるようにした
+- `wrangler.jsonc` の `migrations_dir` は再び `migrations` を使う構成へ戻した
 - 今回の `npx tsc --noEmit` では既存の `src/types.ts` の Durable Object 型エラー（`TranslationCoordinator` が `DurableObjectBranded` 制約を満たさない）が残っており、この変更起因の新規エラーは確認されなかった
