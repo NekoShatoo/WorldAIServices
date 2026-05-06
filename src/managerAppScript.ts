@@ -543,8 +543,8 @@ export const MANAGER_APP_SCRIPT = `
       ui.kpiPromotionUsage.textContent = state.promotionUsage.total.usedPercent.toFixed(2) + "%";
     }
 
-    function formatDateTime(value) {
-      if (!value) return "-";
+    function formatDateTime(value, fallbackText) {
+      if (!value) return fallbackText || "-";
       const date = new Date(value);
       if (Number.isNaN(date.getTime())) return value;
       return date.toLocaleString("ja-JP");
@@ -586,9 +586,9 @@ export const MANAGER_APP_SCRIPT = `
         ios: "iOS",
       };
       if (!record) {
-        return '<div class="rounded-xl border border-[color:var(--mgr-border)] bg-white p-3 space-y-2"><p class="text-sm font-semibold">' + platformNameMap[platform] + '</p><p class="text-xs text-[color:var(--mgr-muted)]">最終更新: -</p><p class="text-xs text-[color:var(--mgr-muted)]">Raw URL: 未アップロード</p></div>';
+        return '<div class="rounded-xl border border-[color:var(--mgr-border)] bg-white p-3 space-y-2"><p class="text-sm font-semibold">' + platformNameMap[platform] + '</p><p class="text-xs text-[color:var(--mgr-muted)]">最終更新: 未アップロード</p><p class="text-xs text-[color:var(--mgr-muted)]">Raw URL: 未アップロード</p></div>';
       }
-      return '<div class="rounded-xl border border-[color:var(--mgr-border)] bg-white p-3 space-y-2"><p class="text-sm font-semibold">' + platformNameMap[platform] + '</p><p class="text-xs text-[color:var(--mgr-muted)]">最終更新: ' + escapeHtml(formatDateTime(record.uploadedAt)) + '</p><a class="text-xs text-sky-700 break-all underline" href="' + escapeHtml(record.rawUrl) + '" target="_blank" rel="noreferrer">' + escapeHtml(record.rawUrl) + '</a><p class="text-xs text-[color:var(--mgr-muted)]">サイズ: ' + escapeHtml(formatBytes(record.size)) + '</p></div>';
+      return '<div class="rounded-xl border border-[color:var(--mgr-border)] bg-white p-3 space-y-2"><p class="text-sm font-semibold">' + platformNameMap[platform] + '</p><p class="text-xs text-[color:var(--mgr-muted)]">最終更新: ' + escapeHtml(formatDateTime(record.uploadedAt, "gistfs API 未提供")) + '</p><a class="text-xs text-sky-700 break-all underline" href="' + escapeHtml(record.rawUrl) + '" target="_blank" rel="noreferrer">' + escapeHtml(record.rawUrl) + '</a><p class="text-xs text-[color:var(--mgr-muted)]">サイズ: ' + escapeHtml(formatBytes(record.size)) + '</p></div>';
     }
 
     function renderPromotionGistStatus() {
@@ -597,7 +597,7 @@ export const MANAGER_APP_SCRIPT = `
     }
 
     function buildGistManageItem(record) {
-      return '<div class="card p-3"><div class="flex flex-wrap items-start justify-between gap-3"><div class="min-w-0 flex-1 space-y-1"><p class="font-semibold break-all">' + escapeHtml(record.path) + '</p><p class="text-xs text-[color:var(--mgr-muted)]">Source: ' + escapeHtml(record.sourceKey || "-") + ' / Platform: ' + escapeHtml(record.platform || "-") + '</p><p class="text-xs text-[color:var(--mgr-muted)]">最終更新: ' + escapeHtml(formatDateTime(record.uploadedAt)) + ' / サイズ: ' + escapeHtml(formatBytes(record.size)) + '</p><a class="text-xs text-sky-700 break-all underline" href="' + escapeHtml(record.rawUrl) + '" target="_blank" rel="noreferrer">' + escapeHtml(record.rawUrl) + '</a></div><button class="px-3 py-2 rounded-xl bg-red-100 text-red-700 text-xs font-semibold" data-gist-delete="' + escapeHtml(record.path) + '">削除</button></div></div>';
+      return '<div class="card p-3"><div class="flex flex-wrap items-start justify-between gap-3"><div class="min-w-0 flex-1 space-y-1"><p class="font-semibold break-all">' + escapeHtml(record.path) + '</p><p class="text-xs text-[color:var(--mgr-muted)]">Source: ' + escapeHtml(record.sourceKey || "-") + ' / Platform: ' + escapeHtml(record.platform || "-") + '</p><p class="text-xs text-[color:var(--mgr-muted)]">最終更新: ' + escapeHtml(formatDateTime(record.uploadedAt, "gistfs API 未提供")) + ' / サイズ: ' + escapeHtml(formatBytes(record.size)) + '</p><a class="text-xs text-sky-700 break-all underline" href="' + escapeHtml(record.rawUrl) + '" target="_blank" rel="noreferrer">' + escapeHtml(record.rawUrl) + '</a></div><button class="px-3 py-2 rounded-xl bg-red-100 text-red-700 text-xs font-semibold" data-gist-delete="' + escapeHtml(record.path) + '">削除</button></div></div>';
     }
 
     function renderGistUploads() {

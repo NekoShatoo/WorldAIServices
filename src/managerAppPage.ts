@@ -20,8 +20,11 @@ export function buildManagerAppPageHtml() {
       <div class="pt-2 border-t border-violet-100">
         <p class="text-xs font-semibold text-[color:var(--mgr-muted)] mb-1">PromotionList</p>
         <button class="nav-item" data-panel="promotion-manage">項目管理</button>
-        <button class="nav-item" data-panel="gist-manage">Gist 管理</button>
         <button class="nav-item" data-panel="docs-promotion">説明ページ</button>
+      </div>
+      <div class="pt-2 border-t border-violet-100">
+        <p class="text-xs font-semibold text-[color:var(--mgr-muted)] mb-1">Gistfs</p>
+        <button class="nav-item" data-panel="gist-manage">Gist 管理</button>
       </div>
       <button id="logoutButton" class="mt-3 px-3 py-2 rounded-lg bg-violet-100 text-violet-700 text-sm font-semibold">ログアウト</button>
     </aside>
@@ -140,7 +143,7 @@ export function buildManagerAppPageHtml() {
         <div class="flex items-center justify-between gap-2">
           <div>
             <h2 class="text-xl font-bold">Gist / 管理</h2>
-            <p class="text-xs text-[color:var(--mgr-muted)]">このサービスが gistfs へ登録した配布ファイルを管理します。</p>
+            <p class="text-xs text-[color:var(--mgr-muted)]">gistfs API から現在の全ファイル一覧を直接取得して管理します。</p>
           </div>
           <button id="gistManageReloadButton" class="px-4 py-2 rounded-xl bg-violet-100 text-violet-700 font-semibold">一覧再読込</button>
         </div>

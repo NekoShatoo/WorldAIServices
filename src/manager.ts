@@ -16,8 +16,6 @@ import {
 	savePromotionPlatformImage,
 	clearPromotionPlatformImages,
 	getPromotionPlatformBinary,
-	getPromotionGistfsStatus,
-	listGistfsUploadRecords,
 } from './database';
 import { TRANSLATION_PROMPT_VERSION } from './constants';
 import { jsonResponse, clampInteger, countCharacters } from './utils';
@@ -25,7 +23,7 @@ import { requestAiTranslation } from './ai';
 import { executeTranslation } from './translation';
 import { convertPromotionImage } from './promotionCrunch';
 import { Env, PromotionItemType, PromotionPlatform } from './types';
-import { deleteGistfsFile, uploadPromotionPlatformToGistfs } from './gistfs';
+import { deleteGistfsFile, getPromotionGistfsStatus, listGistfsFiles, uploadPromotionPlatformToGistfs } from './gistfs';
 
 const SESSION_TTL_SECONDS = 60 * 60 * 12;
 const TOKEN_VERSION = 'v1';
@@ -190,7 +188,11 @@ export async function handleManagerApi(request: Request, env: Env, ctx: Executio
 	}
 
 	if (path === '/promotion/gist/status' && request.method === 'GET') {
-		return jsonResponse({ status: 'ok', result: await getPromotionGistfsStatus(env) });
+		try {
+			return jsonResponse({ status: 'ok', result: await getPromotionGistfsStatus(env) });
+		} catch (error) {
+			return jsonResponse({ status: 'error', result: normalizeGistfsManagerError(error) }, 502);
+		}
 	}
 
 	if (path === '/promotion/gist/upload-platform' && request.method === 'POST') {
@@ -373,7 +375,11 @@ export async function handleManagerApi(request: Request, env: Env, ctx: Executio
 	}
 
 	if (path === '/gistfs/uploads' && request.method === 'GET') {
-		return jsonResponse({ status: 'ok', result: await listGistfsUploadRecords(env) });
+		try {
+			return jsonResponse({ status: 'ok', result: await listGistfsFiles(env) });
+		} catch (error) {
+			return jsonResponse({ status: 'error', result: normalizeGistfsManagerError(error) }, 502);
+		}
 	}
 
 	if (path === '/gistfs/uploads/delete' && request.method === 'POST') {

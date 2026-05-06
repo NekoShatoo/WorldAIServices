@@ -1,4 +1,4 @@
-import { deleteGistfsUploadRecord, getPromotionGistPath, getPromotionPlatformPayloadText, upsertGistfsUploadRecord } from './database';
+import { getPromotionGistPath, getPromotionPlatformPayloadText } from './database';
 import { Env, GistfsFileMetadata, PromotionPlatform } from './types';
 
 const PROMOTION_GIST_SOURCE_KEY = 'PromotionList';
@@ -11,6 +11,13 @@ interface GistfsResponsePayload {
 	mime_type?: string;
 	error?: string;
 	status?: number;
+	files?: Array<{
+		path?: string;
+		size?: number;
+		sha256?: string;
+		raw_url?: string;
+		mime_type?: string;
+	}>;
 }
 
 export async function uploadPromotionPlatformToGistfs(env: Env, platform: PromotionPlatform): Promise<GistfsFileMetadata> {
@@ -37,8 +44,6 @@ export async function uploadPromotionPlatformToGistfs(env: Env, platform: Promot
 		sourceKey: PROMOTION_GIST_SOURCE_KEY,
 		platform,
 	} satisfies GistfsFileMetadata;
-
-	await upsertGistfsUploadRecord(env, metadata);
 	return metadata;
 }
 
@@ -52,16 +57,47 @@ export async function deleteGistfsFile(env: Env, path: string) {
 	const payload = await readGistfsResponsePayload(response);
 	if (!response.ok) throw new Error(buildGistfsErrorMessage('delete_failed', response.status, payload));
 
-	await deleteGistfsUploadRecord(env, normalizedPath);
 	return {
 		deleted: true,
 		path: normalizedPath,
 	};
 }
 
+export async function listGistfsFiles(env: Env): Promise<GistfsFileMetadata[]> {
+	const response = await getGistfsBinding(env).fetch('http://localhost/files', {
+		method: 'GET',
+	});
+	const payload = await readGistfsResponsePayload(response);
+	if (!response.ok) throw new Error(buildGistfsErrorMessage('list_failed', response.status, payload));
+	return Array.isArray(payload.files) ? payload.files.map((entry) => normalizeGistfsMetadata(entry, '', '')) : [];
+}
+
+export async function getPromotionGistfsStatus(env: Env) {
+	const platforms = {
+		pc: await getGistfsPromotionMetadata(env, 'pc'),
+		android: await getGistfsPromotionMetadata(env, 'android'),
+		ios: await getGistfsPromotionMetadata(env, 'ios'),
+	};
+	return {
+		sourceKey: PROMOTION_GIST_SOURCE_KEY,
+		platforms,
+	};
+}
+
 function getGistfsBinding(env: Env) {
 	if (!env.VPC_SERVICE) throw new Error('vpc_service_missing');
 	return env.VPC_SERVICE;
+}
+
+async function getGistfsPromotionMetadata(env: Env, platform: PromotionPlatform) {
+	const path = getPromotionGistPath(platform);
+	const response = await getGistfsBinding(env).fetch(`http://localhost/files/${encodeURIComponent(path)}`, {
+		method: 'GET',
+	});
+	if (response.status === 404) return null;
+	const payload = await readGistfsResponsePayload(response);
+	if (!response.ok) throw new Error(buildGistfsErrorMessage('metadata_failed', response.status, payload));
+	return normalizeGistfsMetadata(payload, PROMOTION_GIST_SOURCE_KEY, platform);
 }
 
 async function readGistfsResponsePayload(response: Response): Promise<GistfsResponsePayload> {
@@ -85,4 +121,31 @@ function buildGistfsErrorMessage(prefix: string, status: number, payload: Gistfs
 function normalizeGistfsNumber(value: unknown, fallback: number) {
 	const numeric = typeof value === 'number' ? value : Number(value);
 	return Number.isFinite(numeric) && numeric >= 0 ? Math.floor(numeric) : fallback;
+}
+
+function normalizeGistfsMetadata(value: GistfsResponsePayload | NonNullable<GistfsResponsePayload['files']>[number], sourceKey: string, platform: PromotionPlatform | ''): GistfsFileMetadata {
+	const path = String(value?.path ?? '');
+	const resolvedSourceKey = sourceKey || inferGistSourceKey(path);
+	const resolvedPlatform = platform || inferPromotionPlatform(path);
+	return {
+		path,
+		size: normalizeGistfsNumber(value?.size, 0),
+		sha256: String(value?.sha256 ?? ''),
+		rawUrl: String(value?.raw_url ?? ''),
+		mimeType: String(value?.mime_type ?? 'application/octet-stream'),
+		uploadedAt: '',
+		sourceKey: resolvedSourceKey,
+		platform: resolvedPlatform,
+	};
+}
+
+function inferGistSourceKey(path: string) {
+	return path.startsWith('PromotionList.') ? PROMOTION_GIST_SOURCE_KEY : '';
+}
+
+function inferPromotionPlatform(path: string): PromotionPlatform | '' {
+	if (path === 'PromotionList.pc.json') return 'pc';
+	if (path === 'PromotionList.android.json') return 'android';
+	if (path === 'PromotionList.ios.json') return 'ios';
+	return '';
 }
