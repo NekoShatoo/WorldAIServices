@@ -616,10 +616,15 @@ export const MANAGER_APP_SCRIPT_PROMOTION = `
     }
 
     async function loadPromotionGistStatus() {
-      const result = (await callApi("/promotion/gist/status", { loadingMessage: "PromotionList の Gist 状態を読み込んでいます..." })).data;
-      if (result.status !== "ok") return;
-      state.promotionGistStatus = result.result;
-      renderPromotionGistStatus();
+      setSectionLoading(ui.promotionGistStatusList, null, true);
+      try {
+        const result = (await callApi("/promotion/gist/status", { loadingMessage: "PromotionList の Gist 状態を読み込んでいます...", skipGlobalLoading: true })).data;
+        if (result.status !== "ok") return;
+        state.promotionGistStatus = result.result;
+        renderPromotionGistStatus();
+      } finally {
+        setSectionLoading(ui.promotionGistStatusList, null, false);
+      }
     }
 
     async function loadGistUploads() {

@@ -68,10 +68,15 @@ export const MANAGER_APP_SCRIPT_ADVERTISEMENT = `
         renderAdvertisementGistStatus();
         return;
       }
-      const result = (await callApi("/advertisement/gist/status?scopeId=" + encodeURIComponent(state.advertisementScopeId), { loadingMessage: "Advertisement の Gist 状態を読み込んでいます..." })).data;
-      if (result.status !== "ok") return;
-      state.advertisementGistStatus = result.result;
-      renderAdvertisementGistStatus();
+      setSectionLoading(ui.advertisementGistStatusList, null, true);
+      try {
+        const result = (await callApi("/advertisement/gist/status?scopeId=" + encodeURIComponent(state.advertisementScopeId), { loadingMessage: "Advertisement の Gist 状態を読み込んでいます...", skipGlobalLoading: true })).data;
+        if (result.status !== "ok") return;
+        state.advertisementGistStatus = result.result;
+        renderAdvertisementGistStatus();
+      } finally {
+        setSectionLoading(ui.advertisementGistStatusList, null, false);
+      }
     }
 
     async function loadAdvertisementManageData(forceReloadUsage) {
