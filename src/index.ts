@@ -1,8 +1,8 @@
 import { AutoRouter } from 'itty-router';
-import { Env, PromotionPlatform } from './types';
+import { Env } from './types';
 import { jsonResponse, countCharacters, buildCacheKey, JSON_HEADERS } from './utils';
 import { TRANSLATION_PROMPT_VERSION } from './constants';
-import { loadConfig, getCachedTranslation, runDatabaseMaintenance, recordError, checkRateLimit, recordTranslationStats, getPromotionListPayload } from './database';
+import { loadConfig, getCachedTranslation, runDatabaseMaintenance, recordError, checkRateLimit, recordTranslationStats } from './database';
 import { executeTranslation, recordTranslationOutcome } from './translation';
 import { handleManagerApi } from './manager';
 import { buildManagerAppPageHtml, buildManagerLoginPageHtml } from './managerPage';
@@ -17,7 +17,6 @@ router.get('/', (request, env) => handleHealth(env));
 router.get('/health', (request, env) => handleHealth(env));
 
 router.get('/trans', (request, env, ctx) => handleTranslate(request, env, ctx, new URL(request.url)));
-router.get('/PromotionList', (request, env) => handlePromotionList(env, new URL(request.url)));
 
 router.get('/mgr', () => handleManagerPage());
 router.get('/mgr/', () => handleManagerPage());
@@ -158,18 +157,6 @@ function handleManagerAppPage() {
 		headers: {
 			'content-type': 'text/html; charset=UTF-8',
 			'cache-control': 'no-store',
-		},
-	});
-}
-
-async function handlePromotionList(env: Env, url: URL) {
-	const platform = String(url.searchParams.get('p') ?? '').trim() as PromotionPlatform;
-	if (platform !== 'pc' && platform !== 'android' && platform !== 'ios') return jsonResponse({ status: 'error', result: 'p は pc/android/ios を指定してください。' }, 400);
-	return new Response(JSON.stringify(await getPromotionListPayload(env, platform)), {
-		status: 200,
-		headers: {
-			...JSON_HEADERS,
-			'cache-control': 'public, max-age=60, s-maxage=300, stale-while-revalidate=600',
 		},
 	});
 }

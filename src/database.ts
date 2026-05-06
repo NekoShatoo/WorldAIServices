@@ -11,6 +11,7 @@ import {
 	PromotionPayload,
 	PromotionPlatform,
 	PromotionPlatformPayloadBundle,
+	GistfsFileMetadata,
 } from './types';
 import { clampInteger, safeMetricNumber, parseStoredJsonObject, MAINTENANCE_BATCH_SIZE } from './utils';
 
@@ -23,6 +24,7 @@ export const DEFAULT_CONFIG: ServiceConfig = Object.freeze({
 });
 const PROMOTION_LIST_MAX_BYTES = 100 * 1024 * 1024;
 const PROMOTION_LIST_CHUNK_SIZE = 900000;
+const PROMOTION_GIST_SOURCE_KEY = 'PromotionList';
 const EMPTY_PROMOTION_PAYLOAD: PromotionPayload = Object.freeze({ Avatar: [], World: [] });
 const EMPTY_PROMOTION_PLATFORM_PAYLOAD_BUNDLE: PromotionPlatformPayloadBundle = Object.freeze({
 	pc: { Avatar: [], World: [] },
@@ -30,6 +32,12 @@ const EMPTY_PROMOTION_PLATFORM_PAYLOAD_BUNDLE: PromotionPlatformPayloadBundle = 
 	ios: { Avatar: [], World: [] },
 });
 const PROMOTION_PLATFORMS: PromotionPlatform[] = ['pc', 'android', 'ios'];
+
+const PROMOTION_GIST_PATHS: Record<PromotionPlatform, string> = {
+	pc: 'PromotionList.pc.json',
+	android: 'PromotionList.android.json',
+	ios: 'PromotionList.ios.json',
+};
 
 export async function loadConfig(env: Env): Promise<ServiceConfig> {
 	const db = env.STATE_DB;
@@ -703,6 +711,106 @@ export async function getPromotionListUsage(env: Env) {
 	};
 }
 
+export function getPromotionGistPath(platform: PromotionPlatform) {
+	return PROMOTION_GIST_PATHS[platform];
+}
+
+export async function getPromotionPlatformPayloadText(env: Env, platform: PromotionPlatform) {
+	const payloadText = await loadPromotionPlatformPayloadText(env, platform);
+	if (payloadText) return payloadText;
+	return JSON.stringify(await loadLegacyPromotionPayload(env, platform));
+}
+
+export async function upsertGistfsUploadRecord(env: Env, metadata: GistfsFileMetadata) {
+	await env.STATE_DB.prepare(
+		`INSERT INTO gistfs_uploaded_files (
+      path,
+      source_key,
+      platform,
+      raw_url,
+      mime_type,
+      sha256,
+      size_bytes,
+      uploaded_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(path) DO UPDATE SET
+      source_key = excluded.source_key,
+      platform = excluded.platform,
+      raw_url = excluded.raw_url,
+      mime_type = excluded.mime_type,
+      sha256 = excluded.sha256,
+      size_bytes = excluded.size_bytes,
+      uploaded_at = excluded.uploaded_at`
+	)
+		.bind(
+			metadata.path,
+			metadata.sourceKey,
+			metadata.platform,
+			metadata.rawUrl,
+			metadata.mimeType,
+			metadata.sha256,
+			metadata.size,
+			metadata.uploadedAt
+		)
+		.run();
+}
+
+export async function deleteGistfsUploadRecord(env: Env, path: string) {
+	await env.STATE_DB.prepare('DELETE FROM gistfs_uploaded_files WHERE path = ?').bind(path).run();
+}
+
+export async function listGistfsUploadRecords(env: Env): Promise<GistfsFileMetadata[]> {
+	const result = await env.STATE_DB.prepare(
+		`SELECT
+      path,
+      source_key,
+      platform,
+      raw_url,
+      mime_type,
+      sha256,
+      size_bytes,
+      uploaded_at
+    FROM gistfs_uploaded_files
+    ORDER BY uploaded_at DESC, path ASC`
+	).all<any>();
+	return (result.results ?? []).map(normalizeGistfsUploadRow);
+}
+
+export async function getPromotionGistfsStatus(env: Env) {
+	const result = await env.STATE_DB.prepare(
+		`SELECT
+      path,
+      source_key,
+      platform,
+      raw_url,
+      mime_type,
+      sha256,
+      size_bytes,
+      uploaded_at
+    FROM gistfs_uploaded_files
+    WHERE source_key = ?
+    ORDER BY uploaded_at DESC, path ASC`
+	)
+		.bind(PROMOTION_GIST_SOURCE_KEY)
+		.all<any>();
+
+	const records = (result.results ?? []).map(normalizeGistfsUploadRow);
+	const platforms = {
+		pc: null as GistfsFileMetadata | null,
+		android: null as GistfsFileMetadata | null,
+		ios: null as GistfsFileMetadata | null,
+	};
+	for (const record of records) {
+		if ((record.platform === 'pc' || record.platform === 'android' || record.platform === 'ios') && !platforms[record.platform]) {
+			platforms[record.platform] = record;
+		}
+	}
+	return {
+		sourceKey: PROMOTION_GIST_SOURCE_KEY,
+		platforms,
+	};
+}
+
 export async function rebuildPromotionListCache(env: Env, targetPlatforms: PromotionPlatform[] = PROMOTION_PLATFORMS) {
 	const normalizedPlatforms = targetPlatforms.filter((platform, index, array) => PROMOTION_PLATFORMS.includes(platform) && array.indexOf(platform) === index);
 	if (normalizedPlatforms.length === 0) {
@@ -963,6 +1071,20 @@ function buildUsageEntry(bytes: number) {
 	return {
 		usedBytes: bytes,
 		usedPercent: Math.min(100, Number(((bytes / PROMOTION_LIST_MAX_BYTES) * 100).toFixed(2))),
+	};
+}
+
+function normalizeGistfsUploadRow(row: any): GistfsFileMetadata {
+	const platform = String(row?.platform ?? '').trim();
+	return {
+		path: String(row?.path ?? ''),
+		sourceKey: String(row?.source_key ?? ''),
+		platform: platform === 'pc' || platform === 'android' || platform === 'ios' ? platform : '',
+		rawUrl: String(row?.raw_url ?? ''),
+		mimeType: String(row?.mime_type ?? ''),
+		sha256: String(row?.sha256 ?? ''),
+		size: safeMetricNumber(row?.size_bytes),
+		uploadedAt: String(row?.uploaded_at ?? ''),
 	};
 }
 

@@ -1,6 +1,7 @@
 export interface Env {
 	STATE_DB: D1Database;
 	TRANSLATION_COORDINATOR: DurableObjectNamespace<import('./coordinator').TranslationCoordinator>;
+	VPC_SERVICE?: Fetcher;
 	MGR_PASSWORD: string;
 	AI_PROVIDER_MODE?: string;
 	AI_TIMEOUT_MS?: string;
@@ -130,4 +131,15 @@ export interface PromotionPlatformPayloadBundle {
 	pc: PromotionPayload;
 	android: PromotionPayload;
 	ios: PromotionPayload;
+}
+
+export interface GistfsFileMetadata {
+	path: string;
+	size: number;
+	sha256: string;
+	rawUrl: string;
+	mimeType: string;
+	uploadedAt: string;
+	sourceKey: string;
+	platform: PromotionPlatform | '';
 }

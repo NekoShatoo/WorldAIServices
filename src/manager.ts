@@ -16,6 +16,8 @@ import {
 	savePromotionPlatformImage,
 	clearPromotionPlatformImages,
 	getPromotionPlatformBinary,
+	getPromotionGistfsStatus,
+	listGistfsUploadRecords,
 } from './database';
 import { TRANSLATION_PROMPT_VERSION } from './constants';
 import { jsonResponse, clampInteger, countCharacters } from './utils';
@@ -23,6 +25,7 @@ import { requestAiTranslation } from './ai';
 import { executeTranslation } from './translation';
 import { convertPromotionImage } from './promotionCrunch';
 import { Env, PromotionItemType, PromotionPlatform } from './types';
+import { deleteGistfsFile, uploadPromotionPlatformToGistfs } from './gistfs';
 
 const SESSION_TTL_SECONDS = 60 * 60 * 12;
 const TOKEN_VERSION = 'v1';
@@ -184,6 +187,21 @@ export async function handleManagerApi(request: Request, env: Env, ctx: Executio
 
 	if (path === '/promotion/usage' && request.method === 'GET') {
 		return jsonResponse({ status: 'ok', result: await getPromotionListUsage(env) });
+	}
+
+	if (path === '/promotion/gist/status' && request.method === 'GET') {
+		return jsonResponse({ status: 'ok', result: await getPromotionGistfsStatus(env) });
+	}
+
+	if (path === '/promotion/gist/upload-platform' && request.method === 'POST') {
+		const body = await readJsonBody(request);
+		const platform = String(body?.platform ?? '').trim() as PromotionPlatform;
+		if (platform !== 'pc' && platform !== 'android' && platform !== 'ios') return jsonResponse({ status: 'error', result: 'platform は pc/android/ios を指定してください。' }, 400);
+		try {
+			return jsonResponse({ status: 'ok', result: await uploadPromotionPlatformToGistfs(env, platform) });
+		} catch (error) {
+			return jsonResponse({ status: 'error', result: normalizeGistfsManagerError(error) }, 502);
+		}
 	}
 
 	if (path === '/promotion/items' && request.method === 'GET') {
@@ -354,6 +372,21 @@ export async function handleManagerApi(request: Request, env: Env, ctx: Executio
 		});
 	}
 
+	if (path === '/gistfs/uploads' && request.method === 'GET') {
+		return jsonResponse({ status: 'ok', result: await listGistfsUploadRecords(env) });
+	}
+
+	if (path === '/gistfs/uploads/delete' && request.method === 'POST') {
+		const body = await readJsonBody(request);
+		const targetPath = String(body?.path ?? '').trim();
+		if (!targetPath) return jsonResponse({ status: 'error', result: 'path を指定してください。' }, 400);
+		try {
+			return jsonResponse({ status: 'ok', result: await deleteGistfsFile(env, targetPath) });
+		} catch (error) {
+			return jsonResponse({ status: 'error', result: normalizeGistfsManagerError(error) }, 502);
+		}
+	}
+
 	if (path === '/docs/ai' && request.method === 'GET') {
 		return jsonResponse({
 			status: 'ok',
@@ -375,13 +408,12 @@ export async function handleManagerApi(request: Request, env: Env, ctx: Executio
 			result: {
 				title: 'PromotionList API 仕様',
 				body: [
-					'公開API: GET /PromotionList?p=pc|android|ios',
-					'レスポンスは { Avatar: PromotionItem[], World: PromotionItem[] }',
-					'PromotionItem: Title / Anchor / Description / Link / ID / Image / ImageWidth / ImageHeight / ImageTextureFormat',
-					'Image は各プラットフォーム向けに変換済みの Base64 データのみを返し、原画像は公開しない',
-					'画像変換は管理画面から pc → android → ios の順で実行する',
-					'公開APIは都度変換せず、管理画面更新時に再生成したキャッシュJSONを返す',
-					'JSON 総サイズ上限は 100MB',
+					'公開 GET /PromotionList?p=pc|android|ios は廃止済み',
+					'配布用 JSON は管理画面から gistfs へ pc / android / ios の 3 本を順番にアップロードする',
+					'アップロード時は gistfs の PUT /files/{path}/content を使い、Worker から ReadableStream で転送する',
+					'管理画面には各プラットフォームの raw URL と最終アップロード日時を表示する',
+					'Gist 管理画面ではアップロード済みファイルの一覧確認と削除ができる',
+					'元データは D1 内のプラットフォーム別キャッシュJSONを再利用するため、アップロード前に変換を済ませておく',
 				],
 			},
 		});
@@ -395,4 +427,11 @@ function base64ToUint8Array(base64: string) {
 	const bytes = new Uint8Array(binary.length);
 	for (let index = 0; index < binary.length; index += 1) bytes[index] = binary.charCodeAt(index);
 	return bytes;
+}
+
+function normalizeGistfsManagerError(error: unknown) {
+	const message = error instanceof Error ? error.message : String(error);
+	if (message === 'vpc_service_missing') return 'VPC_SERVICE binding が未設定です。';
+	if (message === 'path_required') return 'path を指定してください。';
+	return message;
 }

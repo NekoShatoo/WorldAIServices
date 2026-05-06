@@ -1,0 +1,88 @@
+import { deleteGistfsUploadRecord, getPromotionGistPath, getPromotionPlatformPayloadText, upsertGistfsUploadRecord } from './database';
+import { Env, GistfsFileMetadata, PromotionPlatform } from './types';
+
+const PROMOTION_GIST_SOURCE_KEY = 'PromotionList';
+
+interface GistfsResponsePayload {
+	path?: string;
+	size?: number;
+	sha256?: string;
+	raw_url?: string;
+	mime_type?: string;
+	error?: string;
+	status?: number;
+}
+
+export async function uploadPromotionPlatformToGistfs(env: Env, platform: PromotionPlatform): Promise<GistfsFileMetadata> {
+	const path = getPromotionGistPath(platform);
+	const payloadText = await getPromotionPlatformPayloadText(env, platform);
+	const response = await getGistfsBinding(env).fetch(`http://localhost/files/${encodeURIComponent(path)}/content`, {
+		method: 'PUT',
+		headers: {
+			'content-type': 'application/json; charset=UTF-8',
+			'x-gistfs-commit-message': `${path} を更新`,
+		},
+		body: new Blob([payloadText]).stream(),
+	});
+	const payload = await readGistfsResponsePayload(response);
+	if (!response.ok) throw new Error(buildGistfsErrorMessage('upload_failed', response.status, payload));
+
+	const metadata = {
+		path: String(payload.path ?? path),
+		size: normalizeGistfsNumber(payload.size, new TextEncoder().encode(payloadText).length),
+		sha256: String(payload.sha256 ?? ''),
+		rawUrl: String(payload.raw_url ?? ''),
+		mimeType: String(payload.mime_type ?? 'application/json'),
+		uploadedAt: new Date().toISOString(),
+		sourceKey: PROMOTION_GIST_SOURCE_KEY,
+		platform,
+	} satisfies GistfsFileMetadata;
+
+	await upsertGistfsUploadRecord(env, metadata);
+	return metadata;
+}
+
+export async function deleteGistfsFile(env: Env, path: string) {
+	const normalizedPath = String(path ?? '').trim();
+	if (!normalizedPath) throw new Error('path_required');
+
+	const response = await getGistfsBinding(env).fetch(`http://localhost/files/${encodeURIComponent(normalizedPath)}?message=${encodeURIComponent(`${normalizedPath} を削除`)}`, {
+		method: 'DELETE',
+	});
+	const payload = await readGistfsResponsePayload(response);
+	if (!response.ok) throw new Error(buildGistfsErrorMessage('delete_failed', response.status, payload));
+
+	await deleteGistfsUploadRecord(env, normalizedPath);
+	return {
+		deleted: true,
+		path: normalizedPath,
+	};
+}
+
+function getGistfsBinding(env: Env) {
+	if (!env.VPC_SERVICE) throw new Error('vpc_service_missing');
+	return env.VPC_SERVICE;
+}
+
+async function readGistfsResponsePayload(response: Response): Promise<GistfsResponsePayload> {
+	const text = await response.text();
+	if (!text.trim()) return {};
+	try {
+		return JSON.parse(text);
+	} catch {
+		return {
+			error: text,
+			status: response.status,
+		};
+	}
+}
+
+function buildGistfsErrorMessage(prefix: string, status: number, payload: GistfsResponsePayload) {
+	const reason = String(payload.error ?? payload.status ?? '').trim();
+	return reason ? `${prefix}:${status}:${reason}` : `${prefix}:${status}`;
+}
+
+function normalizeGistfsNumber(value: unknown, fallback: number) {
+	const numeric = typeof value === 'number' ? value : Number(value);
+	return Number.isFinite(numeric) && numeric >= 0 ? Math.floor(numeric) : fallback;
+}

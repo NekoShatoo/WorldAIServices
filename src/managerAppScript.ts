@@ -6,6 +6,7 @@ export const MANAGER_APP_SCRIPT = `
       aiOperation: "ai-operation",
       aiTools: "ai-tools",
       promotionManage: "promotion-manage",
+      gistManage: "gist-manage",
       docsAi: "docs-ai",
       docsPromotion: "docs-promotion",
     };
@@ -43,6 +44,16 @@ export const MANAGER_APP_SCRIPT = `
       currentPromotionDetail: null,
       currentConvertHasAlpha: false,
       convertModalBusy: false,
+      promotionGistStatus: {
+        sourceKey: "PromotionList",
+        platforms: {
+          pc: null,
+          android: null,
+          ios: null,
+        },
+      },
+      gistUploads: [],
+      promotionGistUploadBusy: false,
     };
     if (!state.token) location.href = "/mgr";
 
@@ -77,6 +88,7 @@ export const MANAGER_APP_SCRIPT = `
         [PANEL_KEYS.aiOperation]: document.getElementById("panel-ai-operation"),
         [PANEL_KEYS.aiTools]: document.getElementById("panel-ai-tools"),
         [PANEL_KEYS.promotionManage]: document.getElementById("panel-promotion-manage"),
+        [PANEL_KEYS.gistManage]: document.getElementById("panel-gist-manage"),
         [PANEL_KEYS.docsAi]: document.getElementById("panel-docs-ai"),
         [PANEL_KEYS.docsPromotion]: document.getElementById("panel-docs-promotion"),
       },
@@ -88,6 +100,10 @@ export const MANAGER_APP_SCRIPT = `
       promotionUsageTextAndroid: document.getElementById("promotionUsageTextAndroid"),
       promotionUsageTextIos: document.getElementById("promotionUsageTextIos"),
       promotionUsageTextTotal: document.getElementById("promotionUsageTextTotal"),
+      promotionGistUploadButton: document.getElementById("promotionGistUploadButton"),
+      promotionGistStatusList: document.getElementById("promotionGistStatusList"),
+      promotionGistUploadLog: document.getElementById("promotionGistUploadLog"),
+      promotionGistLogClearButton: document.getElementById("promotionGistLogClearButton"),
       promotionLoadingText: document.getElementById("promotionLoadingText"),
       promotionItemsList: document.getElementById("promotionItemsList"),
       promotionCreateOpenButton: document.getElementById("promotionCreateOpenButton"),
@@ -143,6 +159,9 @@ export const MANAGER_APP_SCRIPT = `
       promotionConvertDownloadAndroidButton: document.getElementById("promotionConvertDownloadAndroidButton"),
       promotionConvertDownloadIosButton: document.getElementById("promotionConvertDownloadIosButton"),
       promotionConvertLog: document.getElementById("promotionConvertLog"),
+      gistManageReloadButton: document.getElementById("gistManageReloadButton"),
+      gistManageLoadingText: document.getElementById("gistManageLoadingText"),
+      gistManageList: document.getElementById("gistManageList"),
       globalLoadingOverlay: document.getElementById("globalLoadingOverlay"),
       globalLoadingText: document.getElementById("globalLoadingText"),
     };
@@ -394,7 +413,7 @@ export const MANAGER_APP_SCRIPT = `
     function refreshPromotionPrediction() {
       const payload = readPromotionForm().item;
       const predicted = estimatePromotionBytes(payload);
-      const total = state.promotionUsage.usedBytes + predicted;
+      const total = state.promotionUsage.total.usedBytes + predicted;
       ui.promotionPredictionText.textContent = "追加予測: " + (predicted / (1024 * 1024)).toFixed(2) + "MB / 追加後合計: " + (total / (1024 * 1024)).toFixed(2) + "MB";
       ui.promotionPredictionText.style.color = total > MAX_PROMOTION_BYTES ? "var(--mgr-danger)" : "var(--mgr-muted)";
       return { predicted, total };
@@ -522,6 +541,71 @@ export const MANAGER_APP_SCRIPT = `
       ui.promotionUsageBarIos.style.width = Math.min(100, state.promotionUsage.platforms.ios.usedPercent) + "%";
       ui.promotionUsageTextTotal.textContent = "合計: " + (state.promotionUsage.total.usedBytes / (1024 * 1024)).toFixed(2) + "MB";
       ui.kpiPromotionUsage.textContent = state.promotionUsage.total.usedPercent.toFixed(2) + "%";
+    }
+
+    function formatDateTime(value) {
+      if (!value) return "-";
+      const date = new Date(value);
+      if (Number.isNaN(date.getTime())) return value;
+      return date.toLocaleString("ja-JP");
+    }
+
+    function formatBytes(bytes) {
+      const normalized = Number(bytes) || 0;
+      if (normalized >= 1024 * 1024) return (normalized / (1024 * 1024)).toFixed(2) + "MB";
+      if (normalized >= 1024) return (normalized / 1024).toFixed(2) + "KB";
+      return normalized + "B";
+    }
+
+    function escapeHtml(value) {
+      return String(value ?? "")
+        .replaceAll("&", "&amp;")
+        .replaceAll("<", "&lt;")
+        .replaceAll(">", "&gt;")
+        .replaceAll('"', "&quot;")
+        .replaceAll("'", "&#39;");
+    }
+
+    function appendPromotionGistLog(message) {
+      const current = ui.promotionGistUploadLog.textContent || "";
+      ui.promotionGistUploadLog.textContent = current + (current ? "\\n" : "") + message;
+      ui.promotionGistUploadLog.scrollTop = ui.promotionGistUploadLog.scrollHeight;
+    }
+
+    function setPromotionGistUploadBusy(busy) {
+      state.promotionGistUploadBusy = busy;
+      ui.promotionGistUploadButton.disabled = busy;
+      ui.promotionGistUploadButton.classList.toggle("opacity-70", busy);
+      ui.promotionGistUploadButton.classList.toggle("cursor-not-allowed", busy);
+    }
+
+    function buildPromotionGistStatusCard(platform, record) {
+      const platformNameMap = {
+        pc: "PC",
+        android: "Android",
+        ios: "iOS",
+      };
+      if (!record) {
+        return '<div class="rounded-xl border border-[color:var(--mgr-border)] bg-white p-3 space-y-2"><p class="text-sm font-semibold">' + platformNameMap[platform] + '</p><p class="text-xs text-[color:var(--mgr-muted)]">最終更新: -</p><p class="text-xs text-[color:var(--mgr-muted)]">Raw URL: 未アップロード</p></div>';
+      }
+      return '<div class="rounded-xl border border-[color:var(--mgr-border)] bg-white p-3 space-y-2"><p class="text-sm font-semibold">' + platformNameMap[platform] + '</p><p class="text-xs text-[color:var(--mgr-muted)]">最終更新: ' + escapeHtml(formatDateTime(record.uploadedAt)) + '</p><a class="text-xs text-sky-700 break-all underline" href="' + escapeHtml(record.rawUrl) + '" target="_blank" rel="noreferrer">' + escapeHtml(record.rawUrl) + '</a><p class="text-xs text-[color:var(--mgr-muted)]">サイズ: ' + escapeHtml(formatBytes(record.size)) + '</p></div>';
+    }
+
+    function renderPromotionGistStatus() {
+      const platforms = state.promotionGistStatus.platforms || {};
+      ui.promotionGistStatusList.innerHTML = PROMOTION_PLATFORMS.map((platform) => buildPromotionGistStatusCard(platform, platforms[platform])).join("");
+    }
+
+    function buildGistManageItem(record) {
+      return '<div class="card p-3"><div class="flex flex-wrap items-start justify-between gap-3"><div class="min-w-0 flex-1 space-y-1"><p class="font-semibold break-all">' + escapeHtml(record.path) + '</p><p class="text-xs text-[color:var(--mgr-muted)]">Source: ' + escapeHtml(record.sourceKey || "-") + ' / Platform: ' + escapeHtml(record.platform || "-") + '</p><p class="text-xs text-[color:var(--mgr-muted)]">最終更新: ' + escapeHtml(formatDateTime(record.uploadedAt)) + ' / サイズ: ' + escapeHtml(formatBytes(record.size)) + '</p><a class="text-xs text-sky-700 break-all underline" href="' + escapeHtml(record.rawUrl) + '" target="_blank" rel="noreferrer">' + escapeHtml(record.rawUrl) + '</a></div><button class="px-3 py-2 rounded-xl bg-red-100 text-red-700 text-xs font-semibold" data-gist-delete="' + escapeHtml(record.path) + '">削除</button></div></div>';
+    }
+
+    function renderGistUploads() {
+      if (!state.gistUploads.length) {
+        ui.gistManageList.innerHTML = '<p class="text-sm text-[color:var(--mgr-muted)]">アップロード済みファイルはありません。</p>';
+        return;
+      }
+      ui.gistManageList.innerHTML = state.gistUploads.map(buildGistManageItem).join("");
     }
 
     async function refreshPromotionManagePanel() {
@@ -679,6 +763,25 @@ export const MANAGER_APP_SCRIPT = `
       }
     }
 
+    async function loadPromotionGistStatus() {
+      const result = (await callApi("/promotion/gist/status", { loadingMessage: "PromotionList の Gist 状態を読み込んでいます..." })).data;
+      if (result.status !== "ok") return;
+      state.promotionGistStatus = result.result;
+      renderPromotionGistStatus();
+    }
+
+    async function loadGistUploads() {
+      setSectionLoading(ui.gistManageList, ui.gistManageLoadingText, true, "一覧を読み込み中...");
+      try {
+        const result = (await callApi("/gistfs/uploads", { loadingMessage: "Gist 一覧を読み込んでいます..." })).data;
+        if (result.status !== "ok") return;
+        state.gistUploads = result.result;
+        renderGistUploads();
+      } finally {
+        setSectionLoading(ui.gistManageList, ui.gistManageLoadingText, false);
+      }
+    }
+
     async function loadPromotionItems() {
       setSectionLoading(ui.promotionItemsList, ui.promotionLoadingText, true, "一覧を読み込み中...");
       try {
@@ -696,6 +799,7 @@ export const MANAGER_APP_SCRIPT = `
 
     async function loadPromotionManageData(forceReloadUsage) {
       if (forceReloadUsage) await loadPromotionUsage();
+      await loadPromotionGistStatus();
       await loadPromotionItems();
     }
 
@@ -770,6 +874,7 @@ export const MANAGER_APP_SCRIPT = `
       [PANEL_KEYS.dashboard]: loadDashboard,
       [PANEL_KEYS.aiConfig]: loadStatus,
       [PANEL_KEYS.promotionManage]: async () => await loadPromotionManageData(true),
+      [PANEL_KEYS.gistManage]: loadGistUploads,
       [PANEL_KEYS.docsAi]: createDocsLoader(ui.docsAiBody, "/docs/ai", "AIサービスの説明を読み込んでいます..."),
       [PANEL_KEYS.docsPromotion]: createDocsLoader(ui.docsPromotionBody, "/docs/promotion", "PromotionList の説明を読み込んでいます..."),
     };
@@ -1098,6 +1203,52 @@ export const MANAGER_APP_SCRIPT = `
       await refreshPromotionManagePanel();
     }
 
+    async function uploadPromotionGistPlatform(platform) {
+      const result = (await callApi("/promotion/gist/upload-platform", {
+        method: "POST",
+        body: JSON.stringify({ platform }),
+        loadingMessage: platform + " の JSON を gistfs へアップロードしています...",
+      })).data;
+      if (result.status !== "ok") throw new Error(String(result.result || "upload_failed"));
+      return result.result;
+    }
+
+    async function uploadPromotionGists() {
+      if (state.promotionGistUploadBusy) return;
+      setPromotionGistUploadBusy(true);
+      appendPromotionGistLog("アップロード開始: pc → android → ios");
+      try {
+        for (const platform of PROMOTION_PLATFORMS) {
+          appendPromotionGistLog("[" + platform + "] アップロードを開始します...");
+          const uploaded = await uploadPromotionGistPlatform(platform);
+          appendPromotionGistLog("[" + platform + "] 完了: " + uploaded.rawUrl + " / " + formatBytes(uploaded.size));
+          await loadPromotionGistStatus();
+        }
+        invalidatePanels(PANEL_KEYS.gistManage);
+        if (!ui.panels[PANEL_KEYS.gistManage].classList.contains("hidden")) await loadGistUploads();
+        appendPromotionGistLog("3平台すべてのアップロードが完了しました。");
+      } catch (error) {
+        appendPromotionGistLog("失敗: " + (error instanceof Error ? error.message : String(error)));
+      } finally {
+        setPromotionGistUploadBusy(false);
+      }
+    }
+
+    async function deleteGistUpload(path) {
+      if (!path || !confirm(path + " を gistfs から削除しますか？")) return;
+      const result = (await callApi("/gistfs/uploads/delete", {
+        method: "POST",
+        body: JSON.stringify({ path }),
+        loadingMessage: path + " を gistfs から削除しています...",
+      })).data;
+      if (result.status !== "ok") {
+        alert("削除に失敗しました。");
+        return;
+      }
+      appendPromotionGistLog("削除: " + path);
+      await Promise.all([loadPromotionGistStatus(), loadGistUploads()]);
+    }
+
     function openPromotionPreviewById(id) {
       const item = getPromotionItemById(id);
       if (!item) return;
@@ -1132,6 +1283,13 @@ export const MANAGER_APP_SCRIPT = `
 
       const convertId = actionButton.getAttribute("data-promotion-convert");
       if (convertId) await openPromotionConvertModal(convertId);
+    }
+
+    async function handleGistManageClick(event) {
+      const actionButton = event.target.closest("[data-gist-delete]");
+      if (!actionButton) return;
+      const targetPath = actionButton.getAttribute("data-gist-delete");
+      if (targetPath) await deleteGistUpload(targetPath);
     }
 
     function bindNavigationEvents() {
@@ -1172,6 +1330,10 @@ export const MANAGER_APP_SCRIPT = `
     function bindPromotionEvents() {
       ui.promotionItemsList.addEventListener("click", handlePromotionListClick);
       ui.promotionCreateOpenButton.addEventListener("click", async () => await openPromotionModal(PROMOTION_MODAL_MODE.create));
+      ui.promotionGistUploadButton.addEventListener("click", uploadPromotionGists);
+      ui.promotionGistLogClearButton.addEventListener("click", () => {
+        ui.promotionGistUploadLog.textContent = "";
+      });
       ui.promotionSortEditButton.addEventListener("click", () => setPromotionSortEditMode(true));
       ui.promotionSortCancelButton.addEventListener("click", () => setPromotionSortEditMode(false));
       ui.promotionSortSaveButton.addEventListener("click", async () => {
@@ -1277,10 +1439,19 @@ export const MANAGER_APP_SCRIPT = `
       ui.promotionConvertRunButton.addEventListener("click", runPromotionConversion);
     }
 
+    function bindGistManageEvents() {
+      ui.gistManageReloadButton.addEventListener("click", async () => {
+        invalidatePanels(PANEL_KEYS.gistManage);
+        await ensurePanelData(PANEL_KEYS.gistManage, true);
+      });
+      ui.gistManageList.addEventListener("click", handleGistManageClick);
+    }
+
     function initializePage() {
       bindNavigationEvents();
       bindAiEvents();
       bindPromotionEvents();
+      bindGistManageEvents();
       updatePromotionImageSizeWarning();
       syncPromotionSortEditUi();
       switchPanel(PANEL_KEYS.dashboard);

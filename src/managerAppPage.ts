@@ -20,6 +20,7 @@ export function buildManagerAppPageHtml() {
       <div class="pt-2 border-t border-violet-100">
         <p class="text-xs font-semibold text-[color:var(--mgr-muted)] mb-1">PromotionList</p>
         <button class="nav-item" data-panel="promotion-manage">項目管理</button>
+        <button class="nav-item" data-panel="gist-manage">Gist 管理</button>
         <button class="nav-item" data-panel="docs-promotion">説明ページ</button>
       </div>
       <button id="logoutButton" class="mt-3 px-3 py-2 rounded-lg bg-violet-100 text-violet-700 text-sm font-semibold">ログアウト</button>
@@ -109,12 +110,46 @@ export function buildManagerAppPageHtml() {
           </div>
           <p id="promotionUsageTextTotal" class="text-xs text-[color:var(--mgr-muted)]">合計: 0 / 300MB 相当</p>
         </div>
+        <div class="card p-3 space-y-3">
+          <div class="flex flex-wrap items-center justify-between gap-2">
+            <div>
+              <h3 class="text-sm font-semibold">Gistfs 配布</h3>
+              <p class="text-xs text-[color:var(--mgr-muted)]">pc / android / ios の JSON を順番に gistfs へアップロードします。</p>
+            </div>
+            <button id="promotionGistUploadButton" class="px-4 py-2 rounded-xl bg-sky-600 text-white font-semibold hover:bg-sky-500">3平台を gistfs へアップロード</button>
+          </div>
+          <div id="promotionGistStatusList" class="grid md:grid-cols-3 gap-3"></div>
+          <div class="rounded-xl border border-[color:var(--mgr-border)] bg-slate-50 p-3 space-y-2">
+            <div class="flex items-center justify-between gap-2">
+              <p class="text-sm font-semibold">アップロードログ</p>
+              <button id="promotionGistLogClearButton" class="px-3 py-1 rounded-lg bg-violet-100 text-violet-700 text-xs font-semibold">ログを清空</button>
+            </div>
+            <pre id="promotionGistUploadLog" class="text-xs whitespace-pre-wrap break-all text-[color:var(--mgr-text)] min-h-32 max-h-80 overflow-auto"></pre>
+          </div>
+        </div>
         <div class="card p-3">
           <div class="flex items-center justify-between gap-2 mb-2">
             <h3 class="text-sm font-semibold">登録済み項目</h3>
             <p id="promotionLoadingText" class="hidden text-xs text-[color:var(--mgr-muted)]">一覧を読み込み中...</p>
           </div>
           <div id="promotionItemsList" class="space-y-2 text-sm max-h-[28rem] overflow-y-auto pr-1"></div>
+        </div>
+      </section>
+
+      <section id="panel-gist-manage" class="card p-5 space-y-4 hidden">
+        <div class="flex items-center justify-between gap-2">
+          <div>
+            <h2 class="text-xl font-bold">Gist / 管理</h2>
+            <p class="text-xs text-[color:var(--mgr-muted)]">このサービスが gistfs へ登録した配布ファイルを管理します。</p>
+          </div>
+          <button id="gistManageReloadButton" class="px-4 py-2 rounded-xl bg-violet-100 text-violet-700 font-semibold">一覧再読込</button>
+        </div>
+        <div class="card p-3">
+          <div class="flex items-center justify-between gap-2 mb-2">
+            <h3 class="text-sm font-semibold">アップロード済みファイル</h3>
+            <p id="gistManageLoadingText" class="hidden text-xs text-[color:var(--mgr-muted)]">一覧を読み込み中...</p>
+          </div>
+          <div id="gistManageList" class="space-y-2 text-sm"></div>
         </div>
       </section>
 

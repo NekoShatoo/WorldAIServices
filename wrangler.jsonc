@@ -54,6 +54,13 @@
 			}
 		]
 	},
+	// "vpc_services": [
+	// 	{
+	// 		"binding": "VPC_SERVICE",
+	// 		"service_id": "replace-with-your-vpc-service-id",
+	// 		"remote": true
+	// 	}
+	// ],
 	"migrations": [
 		{
 			"tag": "v1",
