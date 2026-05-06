@@ -17,8 +17,8 @@ export const MANAGER_APP_SCRIPT_ADVERTISEMENT = `
       ui.advertisementScopeSelect.value = state.advertisementScopeId;
     }
 
-    async function loadAdvertisementUsage() {
-      const usageResult = (await callApi("/advertisement/usage", { loadingMessage: "Advertisement の使用率を計算しています..." })).data;
+    async function loadAdvertisementUsage(skipGlobalLoading) {
+      const usageResult = (await callApi("/advertisement/usage", { loadingMessage: "Advertisement の使用率を計算しています...", skipGlobalLoading: !!skipGlobalLoading })).data;
       if (usageResult.status === "ok") {
         state.advertisementUsage = usageResult.result;
         renderAdvertisementUsage();
@@ -26,14 +26,21 @@ export const MANAGER_APP_SCRIPT_ADVERTISEMENT = `
     }
 
     function renderAdvertisementUsage() {
-      const maxBytesText = (state.advertisementUsage.maxBytes / (1024 * 1024)).toFixed(0) + "MB";
-      ui.advertisementUsageTextPc.textContent = (state.advertisementUsage.platforms.pc.usedBytes / (1024 * 1024)).toFixed(2) + "MB / " + maxBytesText;
-      ui.advertisementUsageTextAndroid.textContent = (state.advertisementUsage.platforms.android.usedBytes / (1024 * 1024)).toFixed(2) + "MB / " + maxBytesText;
-      ui.advertisementUsageTextIos.textContent = (state.advertisementUsage.platforms.ios.usedBytes / (1024 * 1024)).toFixed(2) + "MB / " + maxBytesText;
-      ui.advertisementUsageBarPc.style.width = Math.min(100, state.advertisementUsage.platforms.pc.usedPercent) + "%";
-      ui.advertisementUsageBarAndroid.style.width = Math.min(100, state.advertisementUsage.platforms.android.usedPercent) + "%";
-      ui.advertisementUsageBarIos.style.width = Math.min(100, state.advertisementUsage.platforms.ios.usedPercent) + "%";
-      ui.advertisementUsageTextTotal.textContent = "合計: " + (state.advertisementUsage.total.usedBytes / (1024 * 1024)).toFixed(2) + "MB";
+      const usage = state.advertisementUsage || {};
+      const platforms = usage.platforms || {};
+      const total = usage.total || { usedBytes: 0, usedPercent: 0 };
+      const pc = platforms.pc || { usedBytes: 0, usedPercent: 0 };
+      const android = platforms.android || { usedBytes: 0, usedPercent: 0 };
+      const ios = platforms.ios || { usedBytes: 0, usedPercent: 0 };
+      const maxBytes = Number(usage.maxBytes || MAX_PROMOTION_BYTES);
+      const maxBytesText = (maxBytes / (1024 * 1024)).toFixed(0) + "MB";
+      ui.advertisementUsageTextPc.textContent = (Number(pc.usedBytes || 0) / (1024 * 1024)).toFixed(2) + "MB / " + maxBytesText;
+      ui.advertisementUsageTextAndroid.textContent = (Number(android.usedBytes || 0) / (1024 * 1024)).toFixed(2) + "MB / " + maxBytesText;
+      ui.advertisementUsageTextIos.textContent = (Number(ios.usedBytes || 0) / (1024 * 1024)).toFixed(2) + "MB / " + maxBytesText;
+      ui.advertisementUsageBarPc.style.width = Math.min(100, Number(pc.usedPercent || 0)) + "%";
+      ui.advertisementUsageBarAndroid.style.width = Math.min(100, Number(android.usedPercent || 0)) + "%";
+      ui.advertisementUsageBarIos.style.width = Math.min(100, Number(ios.usedPercent || 0)) + "%";
+      ui.advertisementUsageTextTotal.textContent = "合計: " + (Number(total.usedBytes || 0) / (1024 * 1024)).toFixed(2) + "MB";
     }
 
     async function loadAdvertisementItems() {
@@ -81,13 +88,13 @@ export const MANAGER_APP_SCRIPT_ADVERTISEMENT = `
 
     async function loadAdvertisementManageData(forceReloadUsage) {
       await loadAdvertisementScopes();
-      if (forceReloadUsage) await loadAdvertisementUsage();
-      await loadAdvertisementGistStatus();
+      if (forceReloadUsage) await loadAdvertisementUsage(true);
       await loadAdvertisementItems();
+      loadAdvertisementGistStatus();
     }
 
-    async function loadStatus() {
-      const result = (await callApi("/status", { loadingMessage: "設定情報を読み込んでいます..." })).data;
+    async function loadStatus(skipGlobalLoading) {
+      const result = (await callApi("/status", { loadingMessage: "設定情報を読み込んでいます...", skipGlobalLoading: !!skipGlobalLoading })).data;
       if (result.status !== "ok") return null;
       ui.kpiEnabled.textContent = result.result.enabled ? "ON" : "OFF";
       ui.kpiRpm.textContent = String(result.result.requestsPerMinute);
@@ -100,7 +107,13 @@ export const MANAGER_APP_SCRIPT_ADVERTISEMENT = `
 
     function upsertDayChart(day) {
       const labels = ["Cache Hit", "Cache Miss", "AI Success", "AI Failure"];
-      const values = [day.cacheHits, day.cacheMisses, day.aiSuccesses, day.aiFailures];
+      const safeDay = day && typeof day === "object" ? day : {};
+      const values = [
+        Number(safeDay.cacheHits || 0),
+        Number(safeDay.cacheMisses || 0),
+        Number(safeDay.aiSuccesses || 0),
+        Number(safeDay.aiFailures || 0),
+      ];
       if (!state.dayChart) {
         state.dayChart = new Chart(ui.dayChartCanvas, { type: "line", data: { labels, datasets: [{ data: values, borderColor: "#8b5cf6", backgroundColor: "rgba(139,92,246,0.18)", fill: true, tension: 0.3 }] }, options: { responsive: true, plugins: { legend: { display: false } } } });
         return;
@@ -111,7 +124,8 @@ export const MANAGER_APP_SCRIPT_ADVERTISEMENT = `
     }
 
     function upsertLangChart(day) {
-      const entries = Object.entries(day.languages || {}).sort((a, b) => b[1] - a[1]).slice(0, 8);
+      const safeDay = day && typeof day === "object" ? day : {};
+      const entries = Object.entries(safeDay.languages || {}).sort((a, b) => b[1] - a[1]).slice(0, 8);
       const labels = entries.map((item) => item[0]);
       const values = entries.map((item) => item[1]);
       if (!state.langChart) {
@@ -127,13 +141,17 @@ export const MANAGER_APP_SCRIPT_ADVERTISEMENT = `
       setSectionLoading(ui.dayChartCanvas, ui.dashboardLoadingText, true, "Dashboard を読み込み中...");
       setSectionLoading(ui.langChartCanvas, null, true);
       try {
-        const status = await loadStatus();
-        const stats = (await callApi("/stats", { loadingMessage: "統計情報を読み込んでいます..." })).data;
+        const status = await loadStatus(true);
+        const stats = (await callApi("/stats", { loadingMessage: "統計情報を読み込んでいます...", skipGlobalLoading: true })).data;
         if (stats.status === "ok" && status) {
-          upsertDayChart(stats.result.day);
-          upsertLangChart(stats.result.day);
+          upsertDayChart(stats.result && stats.result.day);
+          upsertLangChart(stats.result && stats.result.day);
         }
-        await loadPromotionUsage();
+        try {
+          await loadPromotionUsage(true);
+        } catch (error) {
+          console.error("[mgr] PromotionList 使用率の取得に失敗しました", error);
+        }
       } finally {
         setSectionLoading(ui.dayChartCanvas, ui.dashboardLoadingText, false);
         setSectionLoading(ui.langChartCanvas, null, false);

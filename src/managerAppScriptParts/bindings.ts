@@ -119,8 +119,8 @@ export const MANAGER_APP_SCRIPT_BINDINGS = `
         state.advertisementScopeId = ui.advertisementScopeSelect.value;
         state.advertisementSortEditMode = false;
         syncAdvertisementSortEditUi();
-        await loadAdvertisementGistStatus();
         await loadAdvertisementItems();
+        loadAdvertisementGistStatus();
       });
       ui.refreshAdvertisementUsageButton.addEventListener("click", async () => await loadAdvertisementUsage());
       ui.advertisementGistUploadButton.addEventListener("click", uploadAdvertisementGists);

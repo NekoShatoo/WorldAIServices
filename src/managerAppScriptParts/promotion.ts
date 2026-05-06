@@ -286,15 +286,22 @@ export const MANAGER_APP_SCRIPT_PROMOTION = `
     }
 
     function renderPromotionUsage() {
-      const maxBytesText = (state.promotionUsage.maxBytes / (1024 * 1024)).toFixed(0) + "MB";
-      ui.promotionUsageTextPc.textContent = (state.promotionUsage.platforms.pc.usedBytes / (1024 * 1024)).toFixed(2) + "MB / " + maxBytesText;
-      ui.promotionUsageTextAndroid.textContent = (state.promotionUsage.platforms.android.usedBytes / (1024 * 1024)).toFixed(2) + "MB / " + maxBytesText;
-      ui.promotionUsageTextIos.textContent = (state.promotionUsage.platforms.ios.usedBytes / (1024 * 1024)).toFixed(2) + "MB / " + maxBytesText;
-      ui.promotionUsageBarPc.style.width = Math.min(100, state.promotionUsage.platforms.pc.usedPercent) + "%";
-      ui.promotionUsageBarAndroid.style.width = Math.min(100, state.promotionUsage.platforms.android.usedPercent) + "%";
-      ui.promotionUsageBarIos.style.width = Math.min(100, state.promotionUsage.platforms.ios.usedPercent) + "%";
-      ui.promotionUsageTextTotal.textContent = "合計: " + (state.promotionUsage.total.usedBytes / (1024 * 1024)).toFixed(2) + "MB";
-      ui.kpiPromotionUsage.textContent = state.promotionUsage.total.usedPercent.toFixed(2) + "%";
+      const usage = state.promotionUsage || {};
+      const platforms = usage.platforms || {};
+      const total = usage.total || { usedBytes: 0, usedPercent: 0 };
+      const pc = platforms.pc || { usedBytes: 0, usedPercent: 0 };
+      const android = platforms.android || { usedBytes: 0, usedPercent: 0 };
+      const ios = platforms.ios || { usedBytes: 0, usedPercent: 0 };
+      const maxBytes = Number(usage.maxBytes || MAX_PROMOTION_BYTES);
+      const maxBytesText = (maxBytes / (1024 * 1024)).toFixed(0) + "MB";
+      ui.promotionUsageTextPc.textContent = (Number(pc.usedBytes || 0) / (1024 * 1024)).toFixed(2) + "MB / " + maxBytesText;
+      ui.promotionUsageTextAndroid.textContent = (Number(android.usedBytes || 0) / (1024 * 1024)).toFixed(2) + "MB / " + maxBytesText;
+      ui.promotionUsageTextIos.textContent = (Number(ios.usedBytes || 0) / (1024 * 1024)).toFixed(2) + "MB / " + maxBytesText;
+      ui.promotionUsageBarPc.style.width = Math.min(100, Number(pc.usedPercent || 0)) + "%";
+      ui.promotionUsageBarAndroid.style.width = Math.min(100, Number(android.usedPercent || 0)) + "%";
+      ui.promotionUsageBarIos.style.width = Math.min(100, Number(ios.usedPercent || 0)) + "%";
+      ui.promotionUsageTextTotal.textContent = "合計: " + (Number(total.usedBytes || 0) / (1024 * 1024)).toFixed(2) + "MB";
+      ui.kpiPromotionUsage.textContent = Number(total.usedPercent || 0).toFixed(2) + "%";
     }
 
     function formatDateTime(value, fallbackText) {
@@ -607,8 +614,8 @@ export const MANAGER_APP_SCRIPT_PROMOTION = `
       });
     }
 
-    async function loadPromotionUsage() {
-      const usageResult = (await callApi("/promotion/usage", { loadingMessage: "PromotionList の使用率を計算しています..." })).data;
+    async function loadPromotionUsage(skipGlobalLoading) {
+      const usageResult = (await callApi("/promotion/usage", { loadingMessage: "PromotionList の使用率を計算しています...", skipGlobalLoading: !!skipGlobalLoading })).data;
       if (usageResult.status === "ok") {
         state.promotionUsage = usageResult.result;
         renderPromotionUsage();
