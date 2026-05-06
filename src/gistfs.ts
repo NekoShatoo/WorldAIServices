@@ -9,6 +9,7 @@ interface GistfsResponsePayload {
 	sha256?: string;
 	raw_url?: string;
 	mime_type?: string;
+	updated_at?: string;
 	error?: string;
 	status?: number;
 	files?: Array<{
@@ -17,6 +18,7 @@ interface GistfsResponsePayload {
 		sha256?: string;
 		raw_url?: string;
 		mime_type?: string;
+		updated_at?: string;
 	}>;
 }
 
@@ -133,7 +135,7 @@ function normalizeGistfsMetadata(value: GistfsResponsePayload | NonNullable<Gist
 		sha256: String(value?.sha256 ?? ''),
 		rawUrl: String(value?.raw_url ?? ''),
 		mimeType: String(value?.mime_type ?? 'application/octet-stream'),
-		uploadedAt: '',
+		uploadedAt: String(value?.updated_at ?? ''),
 		sourceKey: resolvedSourceKey,
 		platform: resolvedPlatform,
 	};
