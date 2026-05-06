@@ -163,6 +163,7 @@ export const MANAGER_APP_SCRIPT_LIFECYCLE = `
 
     function resetAdvertisementForm() {
       ui.advertisementTitleInput.value = "";
+      ui.advertisementGroupInput.value = "";
       ui.advertisementUrlInput.value = "";
       ui.advertisementImageInput.value = "";
       ui.advertisementImageFileInput.value = "";
@@ -191,6 +192,7 @@ export const MANAGER_APP_SCRIPT_LIFECYCLE = `
       return {
         item: {
           Title: ui.advertisementTitleInput.value.trim(),
+          Group: ui.advertisementGroupInput.value.trim(),
           URL: ui.advertisementUrlInput.value.trim(),
           Image: ui.advertisementImageInput.value.trim(),
         },
@@ -272,6 +274,7 @@ export const MANAGER_APP_SCRIPT_LIFECYCLE = `
     function fillAdvertisementForm(item) {
       state.advertisementEditingId = item.ID;
       ui.advertisementTitleInput.value = item.Title;
+      ui.advertisementGroupInput.value = item.Group || "";
       ui.advertisementUrlInput.value = item.URL;
       ui.advertisementImageInput.value = item.Image;
       setAdvertisementImagePreview(item.Image);
@@ -352,7 +355,7 @@ export const MANAGER_APP_SCRIPT_LIFECYCLE = `
     async function saveAdvertisementItem(item, loadingMessage) {
       const result = (await callApi("/advertisement/items/update", {
         method: "POST",
-        body: JSON.stringify({ id: item.ID, item: { Title: item.Title, URL: item.URL, Image: item.Image }, predictedBytes: estimatePromotionBytes(item) }),
+        body: JSON.stringify({ id: item.ID, item: { Title: item.Title, Group: item.Group || "", URL: item.URL, Image: item.Image }, predictedBytes: estimatePromotionBytes(item) }),
         loadingMessage,
       })).data;
       if (result.status !== "ok") throw new Error("advertisement_item_save_failed");

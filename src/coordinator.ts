@@ -1,12 +1,11 @@
+import { DurableObject } from 'cloudflare:workers';
 import { Env, TranslationCoordinatorPayload } from './types';
 import { jsonResponse } from './utils';
 import { getCachedTranslation, putCachedTranslation } from './database';
 import { requestAiTranslation } from './ai';
 
-export class TranslationCoordinator implements DurableObject {
+export class TranslationCoordinator extends DurableObject<Env> {
 	private inFlight: Promise<any> | null = null;
-
-	constructor(public state: DurableObjectState, public env: Env) {}
 
 	async fetch(request: Request): Promise<Response> {
 		console.log(`[Coordinator] Incoming request: ${request.url}`);
@@ -66,7 +65,7 @@ export class TranslationCoordinator implements DurableObject {
 				source: payload.requestSource,
 				promptVersion: payload.promptVersion,
 			},
-			this.state.waitUntil.bind(this.state)
+			this.ctx.waitUntil.bind(this.ctx)
 		);
 
 		if (!aiResult.ok) {

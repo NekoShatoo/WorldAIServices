@@ -218,6 +218,7 @@ Advertisement 仕様
 - Advertisement 面板の初回表示と Scope 切替では、Scope / 使用率 / 一覧の読み込みを先に完了させ、gistfs 状態取得は待たずにバックグラウンドで更新するようにした。Gistfs 配布セクションだけが局所 loading になる
 - PromotionList 面板の初回表示も、使用率 / 一覧の読み込みを先に完了させ、gistfs 状態取得は待たずにバックグラウンドで更新するようにした。Gistfs 配布セクションだけが局所 loading になる
 - Advertisement 追加/更新 modal は送信成功後に submit/cancel/close ボタンの disabled 状態を必ず解除するようにした。成功時に `closeAdvertisementModal()` だけで閉じると次回 open 時にボタンが灰色のまま残る問題を修正した
+- Advertisement 項目には任意の `Group` 文字列を追加した。管理画面では `grp_...` のような任意値を入力でき、DB では `advertisement_items.group_name` に保存し、gistfs 用 JSON では各 item に `Group` を空文字込みで出力する
 - PromotionList 追加/更新 modal も送信処理を `finally` で囲み、通信例外や更新途中の例外でも submit/cancel/close ボタンが disabled のまま残らないようにした
 - Dashboard 初期読込は `/stats` や使用率 API の戻り値が欠けていても JS 例外で管理画面全体が止まらないようにした。chart と使用率表示は欠損時に 0 扱いで描画する
 - ログイン画面も同じ `MANAGER_COMMON_STYLE` の visual system に合わせ、入口と管理画面で見た目が分裂しないようにした

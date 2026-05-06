@@ -233,6 +233,7 @@ export const MANAGER_APP_SCRIPT_CORE = `
       advertisementResizeToMultipleOf4Button: document.getElementById("advertisementResizeToMultipleOf4Button"),
       advertisementImageDimensionText: document.getElementById("advertisementImageDimensionText"),
       advertisementTitleInput: document.getElementById("advertisementTitleInput"),
+      advertisementGroupInput: document.getElementById("advertisementGroupInput"),
       advertisementUrlInput: document.getElementById("advertisementUrlInput"),
       advertisementImageInput: document.getElementById("advertisementImageInput"),
       advertisementImageFileInput: document.getElementById("advertisementImageFileInput"),

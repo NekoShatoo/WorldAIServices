@@ -206,6 +206,7 @@ CREATE TABLE IF NOT EXISTS advertisement_items (
   id TEXT PRIMARY KEY,
   scope_id TEXT NOT NULL,
   title TEXT NOT NULL,
+  group_name TEXT NOT NULL DEFAULT '',
   url TEXT NOT NULL,
   image TEXT NOT NULL DEFAULT '',
   image_pc TEXT NOT NULL DEFAULT '',

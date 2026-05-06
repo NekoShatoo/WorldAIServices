@@ -145,6 +145,7 @@ export interface AdvertisementItem {
 	ID: string;
 	ScopeID?: string;
 	Title: string;
+	Group?: string;
 	URL: string;
 	Image: string;
 	ImageWidth?: number;
@@ -159,6 +160,7 @@ export interface AdvertisementItem {
 
 export interface AdvertisementExportItem {
 	Title: string;
+	Group: string;
 	Link: string;
 	Image: string;
 	ImageWidth: number;

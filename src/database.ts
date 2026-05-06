@@ -1405,6 +1405,7 @@ export async function listAdvertisementItems(env: Env, scopeId: string): Promise
 		`SELECT
       id,
       title,
+      group_name,
       url,
       LENGTH(image) AS image_length,
       COALESCE((SELECT SUM(LENGTH(chunk_text)) FROM advertisement_item_image_chunks WHERE item_id = advertisement_items.id AND image_kind = 'raw'), 0) AS image_chunk_length,
@@ -1425,6 +1426,7 @@ export async function listAdvertisementItems(env: Env, scopeId: string): Promise
 	return (result.results ?? []).map((row) => ({
 		ID: String(row.id ?? ''),
 		Title: String(row.title ?? ''),
+		Group: String(row.group_name ?? ''),
 		URL: String(row.url ?? ''),
 		Image: '',
 		UpdatedAt: String(row.updated_at ?? ''),
@@ -1451,10 +1453,10 @@ export async function createAdvertisementItem(env: Env, scopeId: string, payload
 	const nextOrder = Math.max(1, safeMetricNumber(orderRow?.next_order));
 	await env.STATE_DB.prepare(
 		`INSERT INTO advertisement_items (
-      id, scope_id, title, url, image, image_pc, image_android, image_ios, display_order, created_at, updated_at
-    ) VALUES (?, ?, ?, ?, ?, '', '', '', ?, ?, ?)`
+      id, scope_id, title, group_name, url, image, image_pc, image_android, image_ios, display_order, created_at, updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, '', '', '', ?, ?, ?)`
 	)
-		.bind(id, scopeId, payload.Title.trim(), payload.URL.trim(), '', nextOrder, now, now)
+		.bind(id, scopeId, payload.Title.trim(), String(payload.Group ?? '').trim(), payload.URL.trim(), '', nextOrder, now, now)
 		.run();
 	await saveItemImageChunks(env, 'advertisement_item_image_chunks', id, 'raw', payload.Image.trim());
 	const summary = await rebuildAdvertisementCache(env, [scopeId]);
@@ -1471,6 +1473,7 @@ export async function updateAdvertisementItem(env: Env, id: string, payload: Adv
 	await env.STATE_DB.prepare(
 		`UPDATE advertisement_items
     SET title = ?,
+        group_name = ?,
         url = ?,
         image = '',
         image_pc = ?,
@@ -1490,6 +1493,7 @@ export async function updateAdvertisementItem(env: Env, id: string, payload: Adv
 	)
 		.bind(
 			payload.Title.trim(),
+			String(payload.Group ?? '').trim(),
 			payload.URL.trim(),
 			rawImageChanged ? '' : String(currentItem.image_pc ?? ''),
 			rawImageChanged ? 0 : safeMetricNumber(currentItem.image_pc_width),
@@ -1554,6 +1558,7 @@ export async function getAdvertisementItemById(env: Env, id: string): Promise<Ad
 		ID: String(row.id ?? ''),
 		ScopeID: String(row.scope_id ?? ''),
 		Title: String(row.title ?? ''),
+		Group: String(row.group_name ?? ''),
 		URL: String(row.url ?? ''),
 		Image: String(row.image ?? ''),
 		UpdatedAt: String(row.updated_at ?? ''),
@@ -1720,7 +1725,7 @@ async function buildAdvertisementPayloadsForScopes(env: Env, scopeIds: string[],
 	if (scopeIdSet.size === 0) return [];
 	const rows = await env.STATE_DB.prepare(
 		`SELECT
-      id, scope_id, title, url,
+      id, scope_id, title, group_name, url,
       image_pc, image_pc_width, image_pc_height, image_pc_texture_format,
       image_android, image_android_width, image_android_height, image_android_texture_format,
       image_ios, image_ios_width, image_ios_height, image_ios_texture_format
@@ -1745,6 +1750,7 @@ async function buildAdvertisementPayloadsForScopes(env: Env, scopeIds: string[],
 			if (!targetPayload) continue;
 			targetPayload.push({
 				Title: String(row.title ?? ''),
+				Group: String(row.group_name ?? ''),
 				Link: String(row.url ?? ''),
 				Image:
 					platform === 'pc'
@@ -1886,6 +1892,7 @@ async function loadAdvertisementItemRecordById(env: Env, id: string) {
 	const row = await env.STATE_DB.prepare(
 		`SELECT
       id, scope_id, title, url, image,
+      group_name,
       image_pc, image_pc_width, image_pc_height, image_pc_texture_format,
       image_android, image_android_width, image_android_height, image_android_texture_format,
       image_ios, image_ios_width, image_ios_height, image_ios_texture_format,

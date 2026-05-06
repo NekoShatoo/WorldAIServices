@@ -194,7 +194,7 @@ export const MANAGER_APP_SCRIPT_BINDINGS = `
           endGlobalLoading();
         }
       });
-      [ui.advertisementTitleInput, ui.advertisementUrlInput, ui.advertisementImageInput].forEach((input) => input.addEventListener("input", async () => {
+      [ui.advertisementTitleInput, ui.advertisementGroupInput, ui.advertisementUrlInput, ui.advertisementImageInput].forEach((input) => input.addEventListener("input", async () => {
         if (input === ui.advertisementImageInput) {
           setAdvertisementImagePreview(ui.advertisementImageInput.value);
           await refreshAdvertisementImageDimensionText();
