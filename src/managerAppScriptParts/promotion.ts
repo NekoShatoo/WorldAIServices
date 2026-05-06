@@ -662,9 +662,9 @@ export const MANAGER_APP_SCRIPT_PROMOTION = `
     }
 
     async function loadPromotionManageData(forceReloadUsage) {
-      if (forceReloadUsage) await loadPromotionUsage();
-      await loadPromotionGistStatus();
+      if (forceReloadUsage) await loadPromotionUsage(true);
       await loadPromotionItems();
+      loadPromotionGistStatus();
     }
 
 `;
