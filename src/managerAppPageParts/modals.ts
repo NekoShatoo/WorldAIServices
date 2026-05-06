@@ -32,7 +32,7 @@ export function buildAdvertisementModal() {
     <p id="advertisementPredictionText" class="text-xs text-[color:var(--mgr-muted)]">追加予測: 0MB</p>
     <div class="form-grid">
       <label class="field-label">Title<input id="advertisementTitleInput" class="field-input" /></label>
-      <label class="field-label">Group（任意）<input id="advertisementGroupInput" class="field-input" placeholder="grp_caa820c4-7aa6-48bc-a7bc-593376245419" /></label>
+      <label class="field-label">Group（任意）<input id="advertisementGroupInput" class="field-input" placeholder="grp_00000000-0000-0000-0000-000000000000" /></label>
       <label class="field-label">URL<input id="advertisementUrlInput" class="field-input" /></label>
       ${buildImageEditorFields('advertisement')}
     </div>

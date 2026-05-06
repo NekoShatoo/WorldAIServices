@@ -658,7 +658,7 @@ export async function handleManagerApi(request: Request, env: Env, ctx: Executio
 					'Image は変換済みプラットフォーム別画像Base64。未変換の場合は空文字になる',
 					'ImageWidth / ImageHeight は変換元画像サイズ、ImageTextureFormat は crunch API が返した texture format',
 					'順序は管理画面の並び順（display_order）に従う',
-					'最小例: [{ "Title": "Sample", "Group": "grp_caa820c4-7aa6-48bc-a7bc-593376245419", "Link": "https://example.com", "Image": "...base64...", "ImageWidth": 512, "ImageHeight": 256, "ImageTextureFormat": "ETC2_RGBA8" }]',
+					'最小例: [{ "Title": "Sample", "Group": "grp_00000000-0000-0000-0000-000000000000", "Link": "https://example.com", "Image": "...base64...", "ImageWidth": 512, "ImageHeight": 256, "ImageTextureFormat": "ETC2_RGBA8" }]',
 					'アップロード時は gistfs の PUT /files/{path}/content を使い、Worker から ReadableStream で転送する',
 					'Gist 管理画面でファイルを削除した場合、Advertisement 面板の gistfs 状態にも反映される',
 				],
