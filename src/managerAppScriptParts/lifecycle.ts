@@ -61,6 +61,7 @@ export const MANAGER_APP_SCRIPT_LIFECYCLE = `
           ui.promotionTypeInput.value = ui.promotionFilterType.value;
           break;
         case PROMOTION_MODAL_MODE.edit:
+          resetPromotionForm();
           ui.promotionModalTitle.textContent = "PromotionList 編集";
           ui.promotionIdInput.disabled = true;
           fillPromotionForm(item);
@@ -120,18 +121,21 @@ export const MANAGER_APP_SCRIPT_LIFECYCLE = `
       }
 
       beginPromotionSubmitProgress();
-      const request = buildPromotionSubmitRequest(payload, prediction);
-      const result = (await callApi(request.path, { method: "POST", body: JSON.stringify(request.body), loadingMessage: request.loadingMessage })).data;
-      if (result.status !== "ok") {
-        endPromotionSubmitProgress();
-        alert(request.failureMessage);
-        return;
-      }
+      try {
+        const request = buildPromotionSubmitRequest(payload, prediction);
+        const result = (await callApi(request.path, { method: "POST", body: JSON.stringify(request.body), loadingMessage: request.loadingMessage })).data;
+        if (result.status !== "ok") {
+          alert(request.failureMessage);
+          return;
+        }
 
-      setPromotionSubmitProgress(75, "一覧を更新しています...");
-      await refreshPromotionManagePanel();
-      setPromotionSubmitProgress(100, "完了しました。");
-      closePromotionModal();
+        setPromotionSubmitProgress(75, "一覧を更新しています...");
+        await refreshPromotionManagePanel();
+        setPromotionSubmitProgress(100, "完了しました。");
+        closePromotionModal();
+      } finally {
+        endPromotionSubmitProgress();
+      }
     }
 
     async function savePromotionItem(item, loadingMessage) {
@@ -175,6 +179,10 @@ export const MANAGER_APP_SCRIPT_LIFECYCLE = `
       ui.advertisementSubmitProgressBox.classList.add("hidden");
       ui.advertisementSubmitProgressBar.style.width = "0%";
       ui.advertisementSubmitProgressText.textContent = "送信準備中...";
+      ui.advertisementModalSubmitButton.disabled = false;
+      ui.advertisementModalCancelButton.disabled = false;
+      ui.advertisementModalCloseButton.disabled = false;
+      ui.advertisementModalSubmitButton.classList.remove("opacity-70", "cursor-not-allowed");
       state.advertisementEditingId = "";
       state.advertisementUploadedImageDataUrl = "";
     }
@@ -321,21 +329,24 @@ export const MANAGER_APP_SCRIPT_LIFECYCLE = `
       ui.advertisementModalCloseButton.disabled = true;
       ui.advertisementModalSubmitButton.classList.add("opacity-70", "cursor-not-allowed");
       const isCreate = state.advertisementModalMode === PROMOTION_MODAL_MODE.create;
-      setAdvertisementSubmitProgress(35, isCreate ? "追加データを送信しています..." : "更新データを送信しています...");
-      const result = (await callApi(isCreate ? "/advertisement/items" : "/advertisement/items/update", {
-        method: "POST",
-        body: JSON.stringify(isCreate ? { scopeId: state.advertisementScopeId, item: payload.item, predictedBytes: prediction.predicted } : { id: state.advertisementEditingId, item: payload.item, predictedBytes: prediction.predicted }),
-        loadingMessage: isCreate ? "Advertisement 項目を追加しています..." : "Advertisement 項目を更新しています...",
-      })).data;
-      if (result.status !== "ok") {
+      try {
+        setAdvertisementSubmitProgress(35, isCreate ? "追加データを送信しています..." : "更新データを送信しています...");
+        const result = (await callApi(isCreate ? "/advertisement/items" : "/advertisement/items/update", {
+          method: "POST",
+          body: JSON.stringify(isCreate ? { scopeId: state.advertisementScopeId, item: payload.item, predictedBytes: prediction.predicted } : { id: state.advertisementEditingId, item: payload.item, predictedBytes: prediction.predicted }),
+          loadingMessage: isCreate ? "Advertisement 項目を追加しています..." : "Advertisement 項目を更新しています...",
+        })).data;
+        if (result.status !== "ok") {
+          alert(isCreate ? "追加に失敗しました。" : "更新に失敗しました。");
+          return;
+        }
+        setAdvertisementSubmitProgress(75, "一覧を更新しています...");
+        await refreshAdvertisementManagePanel();
+        setAdvertisementSubmitProgress(100, "完了しました。");
+        closeAdvertisementModal();
+      } finally {
         endAdvertisementSubmitProgress();
-        alert(isCreate ? "追加に失敗しました。" : "更新に失敗しました。");
-        return;
       }
-      setAdvertisementSubmitProgress(75, "一覧を更新しています...");
-      await refreshAdvertisementManagePanel();
-      setAdvertisementSubmitProgress(100, "完了しました。");
-      closeAdvertisementModal();
     }
 
     async function saveAdvertisementItem(item, loadingMessage) {
