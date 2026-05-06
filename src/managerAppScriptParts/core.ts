@@ -10,6 +10,7 @@ export const MANAGER_APP_SCRIPT_CORE = `
       gistManage: "gist-manage",
       docsAi: "docs-ai",
       docsPromotion: "docs-promotion",
+      docsAdvertisement: "docs-advertisement",
     };
     const PROMOTION_MODAL_MODE = {
       create: "create",
@@ -122,6 +123,7 @@ export const MANAGER_APP_SCRIPT_CORE = `
         [PANEL_KEYS.gistManage]: document.getElementById("panel-gist-manage"),
         [PANEL_KEYS.docsAi]: document.getElementById("panel-docs-ai"),
         [PANEL_KEYS.docsPromotion]: document.getElementById("panel-docs-promotion"),
+        [PANEL_KEYS.docsAdvertisement]: document.getElementById("panel-docs-advertisement"),
       },
       refreshPromotionUsageButton: document.getElementById("refreshPromotionUsageButton"),
       promotionUsageBarPc: document.getElementById("promotionUsageBarPc"),
@@ -146,6 +148,7 @@ export const MANAGER_APP_SCRIPT_CORE = `
       promotionSortHint: document.getElementById("promotionSortHint"),
       docsAiBody: document.getElementById("docsAiBody"),
       docsPromotionBody: document.getElementById("docsPromotionBody"),
+      docsAdvertisementBody: document.getElementById("docsAdvertisementBody"),
       promotionModal: document.getElementById("promotionModal"),
       promotionModalTitle: document.getElementById("promotionModalTitle"),
       promotionModalCloseButton: document.getElementById("promotionModalCloseButton"),

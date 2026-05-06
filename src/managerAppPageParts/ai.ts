@@ -71,5 +71,9 @@ export function buildDocsPanels() {
 <section id="panel-docs-promotion" class="panel hidden">
   ${buildPanelHeader('PromotionList 説明ページ', 'PromotionList の管理仕様を確認します。')}
   <div id="docsPromotionBody" class="surface mt-3 text-sm space-y-1 text-[color:var(--mgr-text)]"></div>
+</section>
+<section id="panel-docs-advertisement" class="panel hidden">
+  ${buildPanelHeader('Advertisement 説明ページ', 'Advertisement の Scope と gistfs JSON 仕様を確認します。')}
+  <div id="docsAdvertisementBody" class="surface mt-3 text-sm space-y-1 text-[color:var(--mgr-text)]"></div>
 </section>`;
 }

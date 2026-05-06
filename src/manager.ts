@@ -624,10 +624,41 @@ export async function handleManagerApi(request: Request, env: Env, ctx: Executio
 				body: [
 					'公開 GET /PromotionList?p=pc|android|ios は廃止済み',
 					'配布用 JSON は管理画面から gistfs へ pc / android / ios の 3 本を順番にアップロードする',
+					'gistfs ファイル名: PromotionList.pc.json / PromotionList.android.json / PromotionList.ios.json',
+					'各ファイルの JSON は対象プラットフォーム 1 本分だけを含む',
+					'トップレベル構造: { "Avatar": PromotionItem[], "World": PromotionItem[] }',
+					'PromotionItem フィールド: ID, Title, Anchor, Description, Link, Image, ImageWidth, ImageHeight, ImageTextureFormat',
+					'Image は変換済みプラットフォーム別画像Base64。未変換の場合は空文字になる',
+					'ImageWidth / ImageHeight は変換元画像サイズ、ImageTextureFormat は crunch API が返した texture format',
+					'最小例: { "Avatar": [{ "ID": "avatar_001", "Title": "Sample", "Anchor": "sample", "Description": "text", "Link": "https://example.com", "Image": "...base64...", "ImageWidth": 512, "ImageHeight": 512, "ImageTextureFormat": "DXT5" }], "World": [] }',
 					'アップロード時は gistfs の PUT /files/{path}/content を使い、Worker から ReadableStream で転送する',
 					'管理画面には各プラットフォームの raw URL と最終アップロード日時を表示する',
 					'Gist 管理画面ではアップロード済みファイルの一覧確認と削除ができる',
 					'元データは D1 内のプラットフォーム別キャッシュJSONを再利用するため、アップロード前に変換を済ませておく',
+				],
+			},
+		});
+	}
+
+	if (path === '/docs/advertisement' && request.method === 'GET') {
+		return jsonResponse({
+			status: 'ok',
+			result: {
+				title: 'Advertisement API 仕様',
+				body: [
+					'Advertisement は Scope ごとに配布ファイルを分ける',
+					'ScopeKey はファイル名に使う固定キー。Scope 名を変更しても ScopeKey と既存 raw URL は維持する',
+					'JSON 内容には ScopeKey / ScopeName などの Scope 情報は含めない',
+					'gistfs ファイル名: adv_{scopeKey}_pc.json / adv_{scopeKey}_android.json / adv_{scopeKey}_ios.json',
+					'各ファイルの JSON は選択 Scope の対象プラットフォーム 1 本分の配列だけを含む',
+					'トップレベル構造: AdvertisementExportItem[]',
+					'AdvertisementExportItem フィールド: Title, Link, Image, ImageWidth, ImageHeight, ImageTextureFormat',
+					'Image は変換済みプラットフォーム別画像Base64。未変換の場合は空文字になる',
+					'ImageWidth / ImageHeight は変換元画像サイズ、ImageTextureFormat は crunch API が返した texture format',
+					'順序は管理画面の並び順（display_order）に従う',
+					'最小例: [{ "Title": "Sample", "Link": "https://example.com", "Image": "...base64...", "ImageWidth": 512, "ImageHeight": 256, "ImageTextureFormat": "ETC2_RGBA8" }]',
+					'アップロード時は gistfs の PUT /files/{path}/content を使い、Worker から ReadableStream で転送する',
+					'Gist 管理画面でファイルを削除した場合、Advertisement 面板の gistfs 状態にも反映される',
 				],
 			},
 		});

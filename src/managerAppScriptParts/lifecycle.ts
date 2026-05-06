@@ -7,6 +7,7 @@ export const MANAGER_APP_SCRIPT_LIFECYCLE = `
       [PANEL_KEYS.gistManage]: loadGistUploads,
       [PANEL_KEYS.docsAi]: createDocsLoader(ui.docsAiBody, "/docs/ai", "AIサービスの説明を読み込んでいます..."),
       [PANEL_KEYS.docsPromotion]: createDocsLoader(ui.docsPromotionBody, "/docs/promotion", "PromotionList の説明を読み込んでいます..."),
+      [PANEL_KEYS.docsAdvertisement]: createDocsLoader(ui.docsAdvertisementBody, "/docs/advertisement", "Advertisement の説明を読み込んでいます..."),
     };
 
     async function ensurePanelData(panelKey, forceReload) {

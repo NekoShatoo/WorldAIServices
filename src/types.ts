@@ -157,16 +157,19 @@ export interface AdvertisementItem {
 	HasImage?: boolean;
 }
 
-export interface AdvertisementPlatformPayload {
-	ScopeKey: string;
-	ScopeName: string;
-	Items: AdvertisementItem[];
+export interface AdvertisementExportItem {
+	Title: string;
+	Link: string;
+	Image: string;
+	ImageWidth: number;
+	ImageHeight: number;
+	ImageTextureFormat: string;
 }
 
 export interface AdvertisementPlatformPayloadBundle {
-	pc: AdvertisementPlatformPayload[];
-	android: AdvertisementPlatformPayload[];
-	ios: AdvertisementPlatformPayload[];
+	pc: AdvertisementExportItem[];
+	android: AdvertisementExportItem[];
+	ios: AdvertisementExportItem[];
 }
 
 export interface GistfsFileMetadata {

@@ -56,6 +56,7 @@ function buildSidebar() {
     <div class="nav-group">
       <p class="nav-group-title">Advertisement</p>
       <button class="nav-item" data-panel="advertisement-manage">項目管理</button>
+      <button class="nav-item" data-panel="docs-advertisement">説明ページ</button>
     </div>
     <div class="nav-group">
       <p class="nav-group-title">Gistfs</p>

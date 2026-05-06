@@ -15,7 +15,7 @@ import {
 	AdvertisementScope,
 	AdvertisementItem,
 	AdvertisementPlatform,
-	AdvertisementPlatformPayload,
+	AdvertisementExportItem,
 	AdvertisementPlatformPayloadBundle,
 } from './types';
 import { clampInteger, safeMetricNumber, parseStoredJsonObject, MAINTENANCE_BATCH_SIZE } from './utils';
@@ -39,11 +39,6 @@ const EMPTY_PROMOTION_PLATFORM_PAYLOAD_BUNDLE: PromotionPlatformPayloadBundle = 
 	ios: { Avatar: [], World: [] },
 });
 const PROMOTION_PLATFORMS: PromotionPlatform[] = ['pc', 'android', 'ios'];
-const EMPTY_ADVERTISEMENT_PLATFORM_PAYLOAD: AdvertisementPlatformPayload = Object.freeze({
-	ScopeKey: '',
-	ScopeName: '',
-	Items: [],
-});
 const EMPTY_ADVERTISEMENT_PLATFORM_PAYLOAD_BUNDLE: AdvertisementPlatformPayloadBundle = Object.freeze({
 	pc: [],
 	android: [],
@@ -1619,8 +1614,7 @@ export async function getAdvertisementUsage(env: Env) {
 export async function getAdvertisementPlatformPayloadText(env: Env, scopeId: string, platform: AdvertisementPlatform) {
 	const payloadText = await loadAdvertisementPlatformPayloadText(env, scopeId, platform);
 	if (payloadText) return payloadText;
-	const scope = await getAdvertisementScopeById(env, scopeId);
-	return JSON.stringify(buildEmptyAdvertisementPayload(scope?.ScopeKey ?? '', scope?.Name ?? ''));
+	return JSON.stringify(buildEmptyAdvertisementPayload());
 }
 
 export async function rebuildAdvertisementCache(
@@ -1676,8 +1670,7 @@ export async function rebuildAdvertisementCache(
 }
 
 async function buildAdvertisementPayloadsForScopes(env: Env, scopeIds: string[], targetPlatforms: AdvertisementPlatform[]) {
-	const scopes = await Promise.all(scopeIds.map(async (scopeId) => await getAdvertisementScopeById(env, scopeId)));
-	const validScopes = scopes.filter(Boolean) as AdvertisementScope[];
+	const validScopes = (await Promise.all(scopeIds.map(async (scopeId) => await getAdvertisementScopeById(env, scopeId)))).filter(Boolean) as AdvertisementScope[];
 	const scopeIdSet = new Set(validScopes.map((scope) => scope.ID));
 	if (scopeIdSet.size === 0) return [];
 	const rows = await env.STATE_DB.prepare(
@@ -1692,9 +1685,9 @@ async function buildAdvertisementPayloadsForScopes(env: Env, scopeIds: string[],
 	)
 		.bind(...scopeIds)
 		.all<any>();
-	const payloadByScopePlatform = new Map<string, AdvertisementPlatformPayload>();
+	const payloadByScopePlatform = new Map<string, AdvertisementExportItem[]>();
 	for (const scope of validScopes) {
-		for (const platform of targetPlatforms) payloadByScopePlatform.set(`${scope.ID}:${platform}`, buildEmptyAdvertisementPayload(scope.ScopeKey, scope.Name));
+		for (const platform of targetPlatforms) payloadByScopePlatform.set(`${scope.ID}:${platform}`, buildEmptyAdvertisementPayload());
 	}
 	for (const row of rows.results ?? []) {
 		const scopeId = String(row.scope_id ?? '');
@@ -1702,10 +1695,9 @@ async function buildAdvertisementPayloadsForScopes(env: Env, scopeIds: string[],
 		for (const platform of targetPlatforms) {
 			const targetPayload = payloadByScopePlatform.get(`${scopeId}:${platform}`);
 			if (!targetPayload) continue;
-			targetPayload.Items.push({
-				ID: String(row.id ?? ''),
+			targetPayload.push({
 				Title: String(row.title ?? ''),
-				URL: String(row.url ?? ''),
+				Link: String(row.url ?? ''),
 				Image:
 					platform === 'pc' ? String(row.image_pc ?? '') : platform === 'android' ? String(row.image_android ?? '') : String(row.image_ios ?? ''),
 				ImageWidth:
@@ -1719,7 +1711,7 @@ async function buildAdvertisementPayloadsForScopes(env: Env, scopeIds: string[],
 	}
 	return validScopes.flatMap((scope) =>
 		targetPlatforms.map((platform) => {
-			const payload = payloadByScopePlatform.get(`${scope.ID}:${platform}`) ?? buildEmptyAdvertisementPayload(scope.ScopeKey, scope.Name);
+			const payload = payloadByScopePlatform.get(`${scope.ID}:${platform}`) ?? buildEmptyAdvertisementPayload();
 			const payloadText = JSON.stringify(payload);
 			return {
 				scopeId: scope.ID,
@@ -1781,12 +1773,8 @@ function buildAdvertisementUsageEntry(bytes: number) {
 	};
 }
 
-function buildEmptyAdvertisementPayload(scopeKey: string, scopeName: string): AdvertisementPlatformPayload {
-	return {
-		ScopeKey: scopeKey,
-		ScopeName: scopeName,
-		Items: [],
-	};
+function buildEmptyAdvertisementPayload(): AdvertisementExportItem[] {
+	return [];
 }
 
 async function loadAdvertisementItemRecordById(env: Env, id: string) {
