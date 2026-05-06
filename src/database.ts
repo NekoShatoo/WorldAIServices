@@ -12,6 +12,11 @@ import {
 	PromotionPlatform,
 	PromotionPlatformPayloadBundle,
 	GistfsFileMetadata,
+	AdvertisementScope,
+	AdvertisementItem,
+	AdvertisementPlatform,
+	AdvertisementPlatformPayload,
+	AdvertisementPlatformPayloadBundle,
 } from './types';
 import { clampInteger, safeMetricNumber, parseStoredJsonObject, MAINTENANCE_BATCH_SIZE } from './utils';
 
@@ -24,7 +29,9 @@ export const DEFAULT_CONFIG: ServiceConfig = Object.freeze({
 });
 const PROMOTION_LIST_MAX_BYTES = 100 * 1024 * 1024;
 const PROMOTION_LIST_CHUNK_SIZE = 900000;
+const ADVERTISEMENT_LIST_MAX_BYTES = 100 * 1024 * 1024;
 const PROMOTION_GIST_SOURCE_KEY = 'PromotionList';
+const ADVERTISEMENT_GIST_SOURCE_KEY = 'Advertisement';
 const EMPTY_PROMOTION_PAYLOAD: PromotionPayload = Object.freeze({ Avatar: [], World: [] });
 const EMPTY_PROMOTION_PLATFORM_PAYLOAD_BUNDLE: PromotionPlatformPayloadBundle = Object.freeze({
 	pc: { Avatar: [], World: [] },
@@ -32,6 +39,17 @@ const EMPTY_PROMOTION_PLATFORM_PAYLOAD_BUNDLE: PromotionPlatformPayloadBundle = 
 	ios: { Avatar: [], World: [] },
 });
 const PROMOTION_PLATFORMS: PromotionPlatform[] = ['pc', 'android', 'ios'];
+const EMPTY_ADVERTISEMENT_PLATFORM_PAYLOAD: AdvertisementPlatformPayload = Object.freeze({
+	ScopeKey: '',
+	ScopeName: '',
+	Items: [],
+});
+const EMPTY_ADVERTISEMENT_PLATFORM_PAYLOAD_BUNDLE: AdvertisementPlatformPayloadBundle = Object.freeze({
+	pc: [],
+	android: [],
+	ios: [],
+});
+const ADVERTISEMENT_PLATFORMS: AdvertisementPlatform[] = ['pc', 'android', 'ios'];
 
 const PROMOTION_GIST_PATHS: Record<PromotionPlatform, string> = {
 	pc: 'PromotionList.pc.json',
@@ -715,6 +733,10 @@ export function getPromotionGistPath(platform: PromotionPlatform) {
 	return PROMOTION_GIST_PATHS[platform];
 }
 
+export function getAdvertisementGistPath(scopeKey: string, platform: AdvertisementPlatform) {
+	return `adv_${scopeKey}_${platform}.json`;
+}
+
 export async function getPromotionPlatformPayloadText(env: Env, platform: PromotionPlatform) {
 	const payloadText = await loadPromotionPlatformPayloadText(env, platform);
 	if (payloadText) return payloadText;
@@ -1284,4 +1306,505 @@ export async function getPromotionPlatformBinary(env: Env, id: string, platform:
 		contentType: target.contentType,
 		extension: target.extension,
 	};
+}
+
+export async function listAdvertisementScopes(env: Env): Promise<AdvertisementScope[]> {
+	const result = await env.STATE_DB.prepare(
+		`SELECT id, scope_key, name, updated_at
+    FROM advertisement_scopes
+    ORDER BY scope_key ASC`
+	).all<any>();
+	return (result.results ?? []).map((row) => ({
+		ID: String(row.id ?? ''),
+		ScopeKey: String(row.scope_key ?? ''),
+		Name: String(row.name ?? ''),
+		UpdatedAt: String(row.updated_at ?? ''),
+	}));
+}
+
+export async function createAdvertisementScope(env: Env, scopeKey: string, name: string) {
+	const normalizedScopeKey = normalizeAdvertisementScopeKey(scopeKey);
+	if (!normalizedScopeKey) throw new Error('advertisement_scope_key_invalid');
+	const now = new Date().toISOString();
+	const id = crypto.randomUUID();
+	await env.STATE_DB.prepare(
+		`INSERT INTO advertisement_scopes (id, scope_key, name, created_at, updated_at)
+    VALUES (?, ?, ?, ?, ?)`
+	)
+		.bind(id, normalizedScopeKey, name.trim(), now, now)
+		.run();
+	await rebuildAdvertisementCache(env, [id]);
+	return {
+		ID: id,
+		ScopeKey: normalizedScopeKey,
+		Name: name.trim(),
+		UpdatedAt: now,
+	} satisfies AdvertisementScope;
+}
+
+export async function updateAdvertisementScope(env: Env, id: string, name: string) {
+	const now = new Date().toISOString();
+	await env.STATE_DB.prepare('UPDATE advertisement_scopes SET name = ?, updated_at = ? WHERE id = ?').bind(name.trim(), now, id).run();
+	await rebuildAdvertisementCache(env, [id]);
+	const scope = await getAdvertisementScopeById(env, id);
+	if (!scope) throw new Error('not_found');
+	return scope;
+}
+
+export async function deleteAdvertisementScope(env: Env, id: string) {
+	await env.STATE_DB.batch([
+		env.STATE_DB.prepare('DELETE FROM advertisement_platform_cache_chunks WHERE scope_id = ?').bind(id),
+		env.STATE_DB.prepare('DELETE FROM advertisement_platform_cache WHERE scope_id = ?').bind(id),
+		env.STATE_DB.prepare('DELETE FROM advertisement_items WHERE scope_id = ?').bind(id),
+		env.STATE_DB.prepare('DELETE FROM advertisement_scopes WHERE id = ?').bind(id),
+	]);
+}
+
+export async function getAdvertisementScopeById(env: Env, id: string): Promise<AdvertisementScope | null> {
+	const row = await env.STATE_DB.prepare('SELECT id, scope_key, name, updated_at FROM advertisement_scopes WHERE id = ?').bind(id).first<any>();
+	if (!row) return null;
+	return {
+		ID: String(row.id ?? ''),
+		ScopeKey: String(row.scope_key ?? ''),
+		Name: String(row.name ?? ''),
+		UpdatedAt: String(row.updated_at ?? ''),
+	};
+}
+
+export async function listAdvertisementItems(env: Env, scopeId: string): Promise<AdvertisementItem[]> {
+	const result = await env.STATE_DB.prepare(
+		`SELECT
+      id,
+      title,
+      url,
+      LENGTH(image) AS image_length,
+      LENGTH(image_pc) AS image_pc_length,
+      LENGTH(image_android) AS image_android_length,
+      LENGTH(image_ios) AS image_ios_length,
+      updated_at,
+      display_order
+    FROM advertisement_items
+    WHERE scope_id = ?
+    ORDER BY display_order ASC, updated_at DESC, id ASC`
+	)
+		.bind(scopeId)
+		.all<any>();
+	return (result.results ?? []).map((row) => ({
+		ID: String(row.id ?? ''),
+		Title: String(row.title ?? ''),
+		URL: String(row.url ?? ''),
+		Image: '',
+		UpdatedAt: String(row.updated_at ?? ''),
+		DisplayOrder: safeMetricNumber(row.display_order),
+		ConvertedPlatforms: buildConvertedPlatformsFromRow(row),
+		IsImageConverted: hasAllConvertedPlatforms(row),
+		HasImage: safeMetricNumber(row.image_length) > 0,
+	}));
+}
+
+export async function createAdvertisementItem(env: Env, scopeId: string, payload: AdvertisementItem, predictedPayloadBytes: number) {
+	const current = await loadAdvertisementPayloadBytes(env);
+	const expected = current + Math.max(0, Math.floor(predictedPayloadBytes));
+	if (expected > ADVERTISEMENT_LIST_MAX_BYTES) return { ok: false as const, reason: 'payload_limit_exceeded', expectedBytes: expected };
+	const now = new Date().toISOString();
+	const id = crypto.randomUUID();
+	const orderRow = await env.STATE_DB.prepare(
+		`SELECT COALESCE(MAX(display_order), 0) + 1 AS next_order
+    FROM advertisement_items
+    WHERE scope_id = ?`
+	)
+		.bind(scopeId)
+		.first<any>();
+	const nextOrder = Math.max(1, safeMetricNumber(orderRow?.next_order));
+	await env.STATE_DB.prepare(
+		`INSERT INTO advertisement_items (
+      id, scope_id, title, url, image, image_pc, image_android, image_ios, display_order, created_at, updated_at
+    ) VALUES (?, ?, ?, ?, ?, '', '', '', ?, ?, ?)`
+	)
+		.bind(id, scopeId, payload.Title.trim(), payload.URL.trim(), payload.Image.trim(), nextOrder, now, now)
+		.run();
+	const summary = await rebuildAdvertisementCache(env, [scopeId]);
+	return { ok: true as const, summary, id };
+}
+
+export async function updateAdvertisementItem(env: Env, id: string, payload: AdvertisementItem, predictedPayloadBytes: number) {
+	const current = await loadAdvertisementPayloadBytes(env);
+	const expected = current + Math.max(0, Math.floor(predictedPayloadBytes));
+	if (expected > ADVERTISEMENT_LIST_MAX_BYTES) return { ok: false as const, reason: 'payload_limit_exceeded', expectedBytes: expected };
+	const currentItem = await loadAdvertisementItemRecordById(env, id);
+	if (!currentItem) return { ok: false as const, reason: 'not_found' };
+	const rawImageChanged = currentItem.image !== payload.Image;
+	await env.STATE_DB.prepare(
+		`UPDATE advertisement_items
+    SET title = ?,
+        url = ?,
+        image = ?,
+        image_pc = ?,
+        image_pc_width = ?,
+        image_pc_height = ?,
+        image_pc_texture_format = ?,
+        image_android = ?,
+        image_android_width = ?,
+        image_android_height = ?,
+        image_android_texture_format = ?,
+        image_ios = ?,
+        image_ios_width = ?,
+        image_ios_height = ?,
+        image_ios_texture_format = ?,
+        updated_at = ?
+    WHERE id = ?`
+	)
+		.bind(
+			payload.Title.trim(),
+			payload.URL.trim(),
+			payload.Image.trim(),
+			rawImageChanged ? '' : String(currentItem.image_pc ?? ''),
+			rawImageChanged ? 0 : safeMetricNumber(currentItem.image_pc_width),
+			rawImageChanged ? 0 : safeMetricNumber(currentItem.image_pc_height),
+			rawImageChanged ? '' : String(currentItem.image_pc_texture_format ?? ''),
+			rawImageChanged ? '' : String(currentItem.image_android ?? ''),
+			rawImageChanged ? 0 : safeMetricNumber(currentItem.image_android_width),
+			rawImageChanged ? 0 : safeMetricNumber(currentItem.image_android_height),
+			rawImageChanged ? '' : String(currentItem.image_android_texture_format ?? ''),
+			rawImageChanged ? '' : String(currentItem.image_ios ?? ''),
+			rawImageChanged ? 0 : safeMetricNumber(currentItem.image_ios_width),
+			rawImageChanged ? 0 : safeMetricNumber(currentItem.image_ios_height),
+			rawImageChanged ? '' : String(currentItem.image_ios_texture_format ?? ''),
+			new Date().toISOString(),
+			id
+		)
+		.run();
+	const summary = await rebuildAdvertisementCache(env, [String(currentItem.scope_id ?? '')]);
+	return { ok: true as const, summary };
+}
+
+export async function deleteAdvertisementItem(env: Env, id: string) {
+	const currentItem = await loadAdvertisementItemRecordById(env, id);
+	if (!currentItem) return;
+	await env.STATE_DB.prepare('DELETE FROM advertisement_items WHERE id = ?').bind(id).run();
+	await rebuildAdvertisementCache(env, [String(currentItem.scope_id ?? '')]);
+}
+
+export async function reorderAdvertisementItems(env: Env, scopeId: string, orderedIds: string[]) {
+	const normalizedIds = orderedIds.map((id) => String(id ?? '').trim()).filter((id) => id.length > 0);
+	const uniqueIds = new Set(normalizedIds);
+	if (normalizedIds.length === 0 || uniqueIds.size !== normalizedIds.length) return { ok: false as const, reason: 'invalid_ids' };
+	const rows = await env.STATE_DB.prepare(
+		`SELECT id
+    FROM advertisement_items
+    WHERE scope_id = ?
+    ORDER BY display_order ASC, updated_at DESC, id ASC`
+	)
+		.bind(scopeId)
+		.all<any>();
+	const currentIds = (rows.results ?? []).map((row) => String(row.id ?? ''));
+	if (currentIds.length !== normalizedIds.length) return { ok: false as const, reason: 'count_mismatch' };
+	const currentSet = new Set(currentIds);
+	for (const id of normalizedIds) if (!currentSet.has(id)) return { ok: false as const, reason: 'unknown_id' };
+	const now = new Date().toISOString();
+	const statements = normalizedIds.map((itemId, index) =>
+		env.STATE_DB.prepare('UPDATE advertisement_items SET display_order = ?, updated_at = ? WHERE id = ?').bind(index + 1, now, itemId)
+	);
+	if (statements.length > 0) await env.STATE_DB.batch(statements);
+	return { ok: true as const, summary: await rebuildAdvertisementCache(env, [scopeId]) };
+}
+
+export async function getAdvertisementItemById(env: Env, id: string): Promise<AdvertisementItem | null> {
+	const row = await loadAdvertisementItemRecordById(env, id);
+	if (!row) return null;
+	return {
+		ID: String(row.id ?? ''),
+		ScopeID: String(row.scope_id ?? ''),
+		Title: String(row.title ?? ''),
+		URL: String(row.url ?? ''),
+		Image: String(row.image ?? ''),
+		UpdatedAt: String(row.updated_at ?? ''),
+		DisplayOrder: safeMetricNumber(row.display_order),
+		ConvertedPlatforms: buildConvertedPlatformsFromRow({
+			image_pc_length: String(row.image_pc ?? '').length,
+			image_android_length: String(row.image_android ?? '').length,
+			image_ios_length: String(row.image_ios ?? '').length,
+		}),
+		IsImageConverted: !!String(row.image ?? '').trim() && String(row.image_pc ?? '').length > 0 && String(row.image_android ?? '').length > 0 && String(row.image_ios ?? '').length > 0,
+	};
+}
+
+export async function saveAdvertisementPlatformImage(
+	env: Env,
+	id: string,
+	platform: AdvertisementPlatform,
+	convertedImageBase64: string,
+	imageWidth: number,
+	imageHeight: number,
+	textureFormat: string
+) {
+	const columnNameByPlatform = {
+		pc: { image: 'image_pc', width: 'image_pc_width', height: 'image_pc_height', textureFormat: 'image_pc_texture_format' },
+		android: { image: 'image_android', width: 'image_android_width', height: 'image_android_height', textureFormat: 'image_android_texture_format' },
+		ios: { image: 'image_ios', width: 'image_ios_width', height: 'image_ios_height', textureFormat: 'image_ios_texture_format' },
+	};
+	const currentItem = await loadAdvertisementItemRecordById(env, id);
+	if (!currentItem) throw new Error('not_found');
+	const columnNames = columnNameByPlatform[platform];
+	await env.STATE_DB.prepare(
+		`UPDATE advertisement_items
+    SET ${columnNames.image} = ?,
+        ${columnNames.width} = ?,
+        ${columnNames.height} = ?,
+        ${columnNames.textureFormat} = ?,
+        updated_at = ?
+    WHERE id = ?`
+	)
+		.bind(convertedImageBase64, imageWidth, imageHeight, textureFormat, new Date().toISOString(), id)
+		.run();
+	return await rebuildAdvertisementCache(env, [String(currentItem.scope_id ?? '')], [platform]);
+}
+
+export async function clearAdvertisementPlatformImages(env: Env, id: string) {
+	const currentItem = await loadAdvertisementItemRecordById(env, id);
+	if (!currentItem) throw new Error('not_found');
+	await env.STATE_DB.prepare(
+		`UPDATE advertisement_items
+    SET image_pc = '',
+        image_pc_width = 0,
+        image_pc_height = 0,
+        image_pc_texture_format = '',
+        image_android = '',
+        image_android_width = 0,
+        image_android_height = 0,
+        image_android_texture_format = '',
+        image_ios = '',
+        image_ios_width = 0,
+        image_ios_height = 0,
+        image_ios_texture_format = '',
+        updated_at = ?
+    WHERE id = ?`
+	)
+		.bind(new Date().toISOString(), id)
+		.run();
+	return await rebuildAdvertisementCache(env, [String(currentItem.scope_id ?? '')]);
+}
+
+export async function getAdvertisementPlatformBinary(env: Env, id: string, platform: AdvertisementPlatform) {
+	const row = await loadAdvertisementItemRecordById(env, id);
+	if (!row) return null;
+	const mapping = {
+		pc: { image: String(row.image_pc ?? ''), width: safeMetricNumber(row.image_pc_width), height: safeMetricNumber(row.image_pc_height), textureFormat: String(row.image_pc_texture_format ?? ''), contentType: 'application/octet-stream', extension: 'crn' },
+		android: { image: String(row.image_android ?? ''), width: safeMetricNumber(row.image_android_width), height: safeMetricNumber(row.image_android_height), textureFormat: String(row.image_android_texture_format ?? ''), contentType: 'image/ktx', extension: 'ktx' },
+		ios: { image: String(row.image_ios ?? ''), width: safeMetricNumber(row.image_ios_width), height: safeMetricNumber(row.image_ios_height), textureFormat: String(row.image_ios_texture_format ?? ''), contentType: 'image/ktx', extension: 'ktx' },
+	};
+	const target = mapping[platform];
+	if (!target.image) return null;
+	return {
+		id: String(row.id ?? ''),
+		platform,
+		base64: target.image,
+		width: target.width,
+		height: target.height,
+		textureFormat: target.textureFormat,
+		contentType: target.contentType,
+		extension: target.extension,
+	};
+}
+
+export async function getAdvertisementUsage(env: Env) {
+	const usage = await loadAdvertisementCacheUsage(env);
+	return {
+		maxBytes: ADVERTISEMENT_LIST_MAX_BYTES,
+		total: usage.total,
+		platforms: usage.platforms,
+	};
+}
+
+export async function getAdvertisementPlatformPayloadText(env: Env, scopeId: string, platform: AdvertisementPlatform) {
+	const payloadText = await loadAdvertisementPlatformPayloadText(env, scopeId, platform);
+	if (payloadText) return payloadText;
+	const scope = await getAdvertisementScopeById(env, scopeId);
+	return JSON.stringify(buildEmptyAdvertisementPayload(scope?.ScopeKey ?? '', scope?.Name ?? ''));
+}
+
+export async function rebuildAdvertisementCache(
+	env: Env,
+	targetScopeIds: string[],
+	targetPlatforms: AdvertisementPlatform[] = ADVERTISEMENT_PLATFORMS
+) {
+	const normalizedScopeIds = targetScopeIds.map((id) => String(id ?? '').trim()).filter((id) => id.length > 0);
+	const normalizedPlatforms = targetPlatforms.filter((platform, index, array) => ADVERTISEMENT_PLATFORMS.includes(platform) && array.indexOf(platform) === index);
+	if (normalizedScopeIds.length === 0 || normalizedPlatforms.length === 0) {
+		return {
+			totalPayloadBytes: await loadAdvertisementPayloadBytes(env),
+			platforms: {},
+		};
+	}
+	const scopePayloads = await buildAdvertisementPayloadsForScopes(env, normalizedScopeIds, normalizedPlatforms);
+	const currentUsage = await loadAdvertisementCacheUsage(env);
+	let totalPayloadBytes = currentUsage.total.usedBytes;
+	for (const payload of scopePayloads) {
+		totalPayloadBytes -= currentUsage.byScopePlatform[`${payload.scopeId}:${payload.platform}`] ?? 0;
+		totalPayloadBytes += payload.payloadBytes;
+	}
+	if (totalPayloadBytes > ADVERTISEMENT_LIST_MAX_BYTES) throw new Error('advertisement_payload_limit_exceeded');
+	const now = new Date().toISOString();
+	const statements = [];
+	for (const payload of scopePayloads) {
+		statements.push(env.STATE_DB.prepare('DELETE FROM advertisement_platform_cache_chunks WHERE scope_id = ? AND platform = ?').bind(payload.scopeId, payload.platform));
+		for (const [chunkIndex, chunkText] of payload.chunks.entries()) {
+			statements.push(
+				env.STATE_DB.prepare('INSERT INTO advertisement_platform_cache_chunks (scope_id, platform, chunk_index, chunk_text) VALUES (?, ?, ?, ?)').bind(
+					payload.scopeId,
+					payload.platform,
+					chunkIndex,
+					chunkText
+				)
+			);
+		}
+		statements.push(
+			env.STATE_DB.prepare(
+				`INSERT INTO advertisement_platform_cache (scope_id, platform, payload_bytes, payload_updated_at)
+        VALUES (?, ?, ?, ?)
+        ON CONFLICT(scope_id, platform) DO UPDATE SET
+          payload_bytes = excluded.payload_bytes,
+          payload_updated_at = excluded.payload_updated_at`
+			).bind(payload.scopeId, payload.platform, payload.payloadBytes, now)
+		);
+	}
+	if (statements.length > 0) await env.STATE_DB.batch(statements);
+	return {
+		totalPayloadBytes,
+		platforms: Object.fromEntries(scopePayloads.map((payload) => [`${payload.scopeId}:${payload.platform}`, { payloadBytes: payload.payloadBytes, chunkCount: payload.chunks.length }])),
+	};
+}
+
+async function buildAdvertisementPayloadsForScopes(env: Env, scopeIds: string[], targetPlatforms: AdvertisementPlatform[]) {
+	const scopes = await Promise.all(scopeIds.map(async (scopeId) => await getAdvertisementScopeById(env, scopeId)));
+	const validScopes = scopes.filter(Boolean) as AdvertisementScope[];
+	const scopeIdSet = new Set(validScopes.map((scope) => scope.ID));
+	if (scopeIdSet.size === 0) return [];
+	const rows = await env.STATE_DB.prepare(
+		`SELECT
+      id, scope_id, title, url,
+      image_pc, image_pc_width, image_pc_height, image_pc_texture_format,
+      image_android, image_android_width, image_android_height, image_android_texture_format,
+      image_ios, image_ios_width, image_ios_height, image_ios_texture_format
+    FROM advertisement_items
+    WHERE scope_id IN (${scopeIds.map(() => '?').join(', ')})
+    ORDER BY scope_id ASC, display_order ASC, updated_at DESC, id ASC`
+	)
+		.bind(...scopeIds)
+		.all<any>();
+	const payloadByScopePlatform = new Map<string, AdvertisementPlatformPayload>();
+	for (const scope of validScopes) {
+		for (const platform of targetPlatforms) payloadByScopePlatform.set(`${scope.ID}:${platform}`, buildEmptyAdvertisementPayload(scope.ScopeKey, scope.Name));
+	}
+	for (const row of rows.results ?? []) {
+		const scopeId = String(row.scope_id ?? '');
+		if (!scopeIdSet.has(scopeId)) continue;
+		for (const platform of targetPlatforms) {
+			const targetPayload = payloadByScopePlatform.get(`${scopeId}:${platform}`);
+			if (!targetPayload) continue;
+			targetPayload.Items.push({
+				ID: String(row.id ?? ''),
+				Title: String(row.title ?? ''),
+				URL: String(row.url ?? ''),
+				Image:
+					platform === 'pc' ? String(row.image_pc ?? '') : platform === 'android' ? String(row.image_android ?? '') : String(row.image_ios ?? ''),
+				ImageWidth:
+					platform === 'pc' ? safeMetricNumber(row.image_pc_width) : platform === 'android' ? safeMetricNumber(row.image_android_width) : safeMetricNumber(row.image_ios_width),
+				ImageHeight:
+					platform === 'pc' ? safeMetricNumber(row.image_pc_height) : platform === 'android' ? safeMetricNumber(row.image_android_height) : safeMetricNumber(row.image_ios_height),
+				ImageTextureFormat:
+					platform === 'pc' ? String(row.image_pc_texture_format ?? '') : platform === 'android' ? String(row.image_android_texture_format ?? '') : String(row.image_ios_texture_format ?? ''),
+			});
+		}
+	}
+	return validScopes.flatMap((scope) =>
+		targetPlatforms.map((platform) => {
+			const payload = payloadByScopePlatform.get(`${scope.ID}:${platform}`) ?? buildEmptyAdvertisementPayload(scope.ScopeKey, scope.Name);
+			const payloadText = JSON.stringify(payload);
+			return {
+				scopeId: scope.ID,
+				platform,
+				payloadText,
+				payloadBytes: new TextEncoder().encode(payloadText).length,
+				chunks: splitPromotionPayload(payloadText),
+			};
+		})
+	);
+}
+
+async function loadAdvertisementPlatformPayloadText(env: Env, scopeId: string, platform: AdvertisementPlatform) {
+	const result = await env.STATE_DB.prepare(
+		`SELECT chunk_text
+    FROM advertisement_platform_cache_chunks
+    WHERE scope_id = ? AND platform = ?
+    ORDER BY chunk_index ASC`
+	)
+		.bind(scopeId, platform)
+		.all<any>();
+	const chunks = (result.results ?? []).map((row) => String(row.chunk_text ?? ''));
+	return chunks.length > 0 ? chunks.join('') : '';
+}
+
+async function loadAdvertisementPayloadBytes(env: Env) {
+	const usage = await loadAdvertisementCacheUsage(env);
+	return usage.total.usedBytes;
+}
+
+async function loadAdvertisementCacheUsage(env: Env) {
+	const usage = {
+		total: buildAdvertisementUsageEntry(0),
+		platforms: {
+			pc: buildAdvertisementUsageEntry(0),
+			android: buildAdvertisementUsageEntry(0),
+			ios: buildAdvertisementUsageEntry(0),
+		},
+		byScopePlatform: {} as Record<string, number>,
+	};
+	const result = await env.STATE_DB.prepare('SELECT scope_id, platform, payload_bytes FROM advertisement_platform_cache').all<any>();
+	let totalBytes = 0;
+	for (const row of result.results ?? []) {
+		const platform = String(row.platform ?? '') as AdvertisementPlatform;
+		if (!ADVERTISEMENT_PLATFORMS.includes(platform)) continue;
+		const bytes = safeMetricNumber(row.payload_bytes);
+		usage.platforms[platform] = buildAdvertisementUsageEntry(usage.platforms[platform].usedBytes + bytes);
+		usage.byScopePlatform[`${String(row.scope_id ?? '')}:${platform}`] = bytes;
+		totalBytes += bytes;
+	}
+	usage.total = buildAdvertisementUsageEntry(totalBytes);
+	return usage;
+}
+
+function buildAdvertisementUsageEntry(bytes: number) {
+	return {
+		usedBytes: bytes,
+		usedPercent: Math.min(100, Number(((bytes / ADVERTISEMENT_LIST_MAX_BYTES) * 100).toFixed(2))),
+	};
+}
+
+function buildEmptyAdvertisementPayload(scopeKey: string, scopeName: string): AdvertisementPlatformPayload {
+	return {
+		ScopeKey: scopeKey,
+		ScopeName: scopeName,
+		Items: [],
+	};
+}
+
+async function loadAdvertisementItemRecordById(env: Env, id: string) {
+	return await env.STATE_DB.prepare(
+		`SELECT
+      id, scope_id, title, url, image,
+      image_pc, image_pc_width, image_pc_height, image_pc_texture_format,
+      image_android, image_android_width, image_android_height, image_android_texture_format,
+      image_ios, image_ios_width, image_ios_height, image_ios_texture_format,
+      updated_at, display_order
+    FROM advertisement_items
+    WHERE id = ?`
+	)
+		.bind(id)
+		.first<any>();
+}
+
+function normalizeAdvertisementScopeKey(value: string) {
+	const normalized = String(value ?? '').trim().toLowerCase();
+	return /^[a-z0-9_-]+$/.test(normalized) ? normalized : '';
 }

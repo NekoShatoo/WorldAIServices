@@ -103,6 +103,7 @@ export interface TranslationStatsSummary {
 
 export type PromotionItemType = 'Avatar' | 'World';
 export type PromotionPlatform = 'pc' | 'android' | 'ios';
+export type AdvertisementPlatform = PromotionPlatform;
 
 export interface PromotionItem {
 	ID: string;
@@ -131,6 +132,41 @@ export interface PromotionPlatformPayloadBundle {
 	pc: PromotionPayload;
 	android: PromotionPayload;
 	ios: PromotionPayload;
+}
+
+export interface AdvertisementScope {
+	ID: string;
+	ScopeKey: string;
+	Name: string;
+	UpdatedAt?: string;
+}
+
+export interface AdvertisementItem {
+	ID: string;
+	ScopeID?: string;
+	Title: string;
+	URL: string;
+	Image: string;
+	ImageWidth?: number;
+	ImageHeight?: number;
+	ImageTextureFormat?: string;
+	UpdatedAt?: string;
+	DisplayOrder?: number;
+	ConvertedPlatforms?: AdvertisementPlatform[];
+	IsImageConverted?: boolean;
+	HasImage?: boolean;
+}
+
+export interface AdvertisementPlatformPayload {
+	ScopeKey: string;
+	ScopeName: string;
+	Items: AdvertisementItem[];
+}
+
+export interface AdvertisementPlatformPayloadBundle {
+	pc: AdvertisementPlatformPayload[];
+	android: AdvertisementPlatformPayload[];
+	ios: AdvertisementPlatformPayload[];
 }
 
 export interface GistfsFileMetadata {

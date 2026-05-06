@@ -23,6 +23,10 @@ export function buildManagerAppPageHtml() {
         <button class="nav-item" data-panel="docs-promotion">説明ページ</button>
       </div>
       <div class="pt-2 border-t border-violet-100">
+        <p class="text-xs font-semibold text-[color:var(--mgr-muted)] mb-1">Advertisement</p>
+        <button class="nav-item" data-panel="advertisement-manage">項目管理</button>
+      </div>
+      <div class="pt-2 border-t border-violet-100">
         <p class="text-xs font-semibold text-[color:var(--mgr-muted)] mb-1">Gistfs</p>
         <button class="nav-item" data-panel="gist-manage">Gist 管理</button>
       </div>
@@ -139,6 +143,70 @@ export function buildManagerAppPageHtml() {
         </div>
       </section>
 
+      <section id="panel-advertisement-manage" class="card p-5 space-y-4 hidden">
+        <div class="flex flex-wrap items-center justify-between gap-3">
+          <h2 class="text-xl font-bold">Advertisement / 項目管理</h2>
+          <div class="flex flex-wrap gap-2">
+            <select id="advertisementScopeSelect" class="px-3 py-2 rounded-xl border border-[color:var(--mgr-border)] bg-white text-sm"></select>
+            <button id="advertisementScopeCreateButton" class="px-4 py-2 rounded-xl bg-violet-600 text-white font-semibold hover:bg-violet-500">Scope 追加</button>
+            <button id="advertisementScopeRenameButton" class="px-4 py-2 rounded-xl bg-violet-100 text-violet-700 font-semibold">Scope 名変更</button>
+            <button id="advertisementScopeDeleteButton" class="px-4 py-2 rounded-xl bg-red-100 text-red-700 font-semibold">Scope 削除</button>
+          </div>
+        </div>
+        <div class="space-y-2">
+          <div class="flex items-center justify-between"><p class="text-sm font-semibold">API 使用率（上限 100MB）</p><button id="refreshAdvertisementUsageButton" class="px-3 py-1 rounded-lg bg-violet-100 text-violet-700 text-sm font-semibold">再計算</button></div>
+          <div class="space-y-2">
+            <div>
+              <div class="flex items-center justify-between text-xs text-[color:var(--mgr-muted)]"><span>PC</span><span id="advertisementUsageTextPc">0 / 100MB</span></div>
+              <div class="w-full h-4 bg-violet-100 rounded-full overflow-hidden"><div id="advertisementUsageBarPc" class="h-full bg-sky-500" style="width: 0%"></div></div>
+            </div>
+            <div>
+              <div class="flex items-center justify-between text-xs text-[color:var(--mgr-muted)]"><span>Android</span><span id="advertisementUsageTextAndroid">0 / 100MB</span></div>
+              <div class="w-full h-4 bg-violet-100 rounded-full overflow-hidden"><div id="advertisementUsageBarAndroid" class="h-full bg-emerald-500" style="width: 0%"></div></div>
+            </div>
+            <div>
+              <div class="flex items-center justify-between text-xs text-[color:var(--mgr-muted)]"><span>iOS</span><span id="advertisementUsageTextIos">0 / 100MB</span></div>
+              <div class="w-full h-4 bg-violet-100 rounded-full overflow-hidden"><div id="advertisementUsageBarIos" class="h-full bg-amber-500" style="width: 0%"></div></div>
+            </div>
+          </div>
+          <p id="advertisementUsageTextTotal" class="text-xs text-[color:var(--mgr-muted)]">合計: 0 / 300MB 相当</p>
+        </div>
+        <div class="card p-3 space-y-3">
+          <div class="flex flex-wrap items-center justify-between gap-2">
+            <div>
+              <h3 class="text-sm font-semibold">Gistfs 配布</h3>
+              <p class="text-xs text-[color:var(--mgr-muted)]">選択中 Scope の pc / android / ios JSON を順番に gistfs へアップロードします。</p>
+            </div>
+            <button id="advertisementGistUploadButton" class="px-4 py-2 rounded-xl bg-sky-600 text-white font-semibold hover:bg-sky-500">選択 Scope を gistfs へアップロード</button>
+          </div>
+          <div id="advertisementGistStatusList" class="grid md:grid-cols-3 gap-3"></div>
+          <div class="rounded-xl border border-[color:var(--mgr-border)] bg-slate-50 p-3 space-y-2">
+            <div class="flex items-center justify-between gap-2">
+              <p class="text-sm font-semibold">アップロードログ</p>
+              <button id="advertisementGistLogClearButton" class="px-3 py-1 rounded-lg bg-violet-100 text-violet-700 text-xs font-semibold">ログを清空</button>
+            </div>
+            <pre id="advertisementGistUploadLog" class="text-xs whitespace-pre-wrap break-all text-[color:var(--mgr-text)] min-h-32 max-h-80 overflow-auto"></pre>
+          </div>
+        </div>
+        <div class="card p-3 space-y-3">
+          <div class="flex items-center justify-between gap-2">
+            <div class="flex items-center gap-2">
+              <h3 class="text-sm font-semibold">登録済み項目</h3>
+              <p id="advertisementLoadingText" class="hidden text-xs text-[color:var(--mgr-muted)]">一覧を読み込み中...</p>
+            </div>
+            <div class="flex gap-2">
+              <button id="advertisementSortEditButton" class="px-4 py-2 rounded-xl bg-violet-100 text-violet-700 font-semibold">並び替え編集</button>
+              <button id="advertisementSortSaveButton" class="hidden px-4 py-2 rounded-xl bg-violet-600 text-white font-semibold hover:bg-violet-500">並び順を保存</button>
+              <button id="advertisementSortCancelButton" class="hidden px-4 py-2 rounded-xl bg-violet-100 text-violet-700 font-semibold">編集終了</button>
+              <button id="advertisementCreateOpenButton" class="px-4 py-2 rounded-xl bg-violet-600 text-white font-semibold hover:bg-violet-500">新規追加</button>
+              <button id="advertisementReloadButton" class="px-4 py-2 rounded-xl bg-violet-100 text-violet-700 font-semibold">一覧再読込</button>
+            </div>
+          </div>
+          <p id="advertisementSortHint" class="hidden text-xs text-[color:var(--mgr-muted)]">並び替え編集中です。項目をドラッグして順番を調整し、最後に保存してください。</p>
+          <div id="advertisementItemsList" class="space-y-2 text-sm max-h-[28rem] overflow-y-auto pr-1"></div>
+        </div>
+      </section>
+
       <section id="panel-gist-manage" class="card p-5 space-y-4 hidden">
         <div class="flex items-center justify-between gap-2">
           <div>
@@ -232,6 +300,105 @@ export function buildManagerAppPageHtml() {
       </div>
       <div class="flex-1 overflow-auto flex items-center justify-center">
         <img id="promotionImagePreviewLarge" class="max-w-full max-h-full object-contain" alt="promotion-preview-large" />
+      </div>
+    </div>
+  </div>
+  <div id="advertisementModal" class="modal-backdrop hidden">
+    <div class="card modal-card-scroll w-full max-w-3xl p-5 space-y-4">
+      <div class="flex items-center justify-between">
+        <h3 id="advertisementModalTitle" class="text-lg font-bold">Advertisement 追加</h3>
+        <button id="advertisementModalCloseButton" class="px-3 py-1 rounded bg-violet-100 text-violet-700 text-sm font-semibold">閉じる</button>
+      </div>
+      <p id="advertisementPredictionText" class="text-xs text-[color:var(--mgr-muted)]">追加予測: 0MB</p>
+      <div class="grid md:grid-cols-2 gap-3">
+        <label class="text-sm">Title<input id="advertisementTitleInput" class="mt-1 w-full border rounded-xl px-3 py-2 border-[color:var(--mgr-border)]" /></label>
+        <label class="text-sm">URL<input id="advertisementUrlInput" class="mt-1 w-full border rounded-xl px-3 py-2 border-[color:var(--mgr-border)]" /></label>
+        <details class="text-sm md:col-span-2"><summary class="cursor-pointer select-none font-semibold text-[color:var(--mgr-muted)]">Image (Base64) [デバッグ用]</summary><textarea id="advertisementImageInput" rows="4" class="mt-2 w-full border rounded-xl px-3 py-2 border-[color:var(--mgr-border)]"></textarea></details>
+        <div class="md:col-span-2 grid md:grid-cols-3 gap-3 items-end">
+          <label class="text-sm md:col-span-2">画像アップロード<input id="advertisementImageFileInput" type="file" accept="image/*" class="mt-1 w-full border rounded-xl px-3 py-2 border-[color:var(--mgr-border)] bg-white" /></label>
+          <div class="space-y-2">
+            <label class="text-sm flex items-center gap-2"><input id="advertisementCompressEnabled" type="checkbox" checked /><span>画像圧縮</span></label>
+            <label class="text-sm">MaxSize
+              <select id="advertisementCompressMaxSize" class="mt-1 w-full border rounded-xl px-3 py-2 border-[color:var(--mgr-border)] bg-white">
+                <option value="32">32</option><option value="64">64</option><option value="128">128</option><option value="256">256</option><option value="512" selected>512</option><option value="1024">1024</option><option value="2048">2048</option><option value="4096">4096</option><option value="8192">8192</option>
+              </select>
+            </label>
+          </div>
+        </div>
+        <p id="advertisementImageSizeWarning" class="text-xs text-yellow-700 md:col-span-2 hidden">512を超える画像は容量を圧迫する可能性があります。</p>
+        <div id="advertisementImageMultipleOf4Status" class="hidden md:col-span-2 rounded-xl border px-4 py-3 text-sm font-semibold"></div>
+        <div class="md:col-span-2 flex flex-wrap items-center gap-2">
+          <button id="advertisementResizeToMultipleOf4Button" type="button" class="px-3 py-2 rounded-lg bg-violet-100 text-violet-700 text-sm font-semibold">4の倍数へ拡大して保存内容に反映</button>
+          <p id="advertisementImageDimensionText" class="text-xs text-[color:var(--mgr-muted)]">画像サイズ: -</p>
+        </div>
+        <div class="md:col-span-2 space-y-2">
+          <p class="text-sm font-semibold">圧縮後プレビュー</p>
+          <button id="advertisementImagePreviewOpenButton" type="button" class="hidden px-3 py-2 rounded-lg bg-violet-100 text-violet-700 text-sm font-semibold">プレビューを拡大表示</button>
+          <div id="advertisementImagePreviewContainer" class="hidden relative inline-block">
+            <img id="advertisementImagePreview" class="max-h-40 rounded-xl border border-[color:var(--mgr-border)] object-contain bg-white" alt="advertisement-preview" />
+            <div id="advertisementImageMagnifierLens" class="hidden absolute w-28 h-28 rounded-full border-2 border-violet-400 shadow-lg pointer-events-none bg-no-repeat"></div>
+          </div>
+        </div>
+      </div>
+      <div class="flex justify-end gap-2">
+        <div id="advertisementSubmitProgressBox" class="hidden flex-1 max-w-xs self-center">
+          <div class="w-full space-y-1">
+            <p id="advertisementSubmitProgressText" class="text-xs text-[color:var(--mgr-muted)]">送信準備中...</p>
+            <div class="w-full h-2 bg-violet-100 rounded-full overflow-hidden">
+              <div id="advertisementSubmitProgressBar" class="h-full bg-violet-500 transition-all duration-200" style="width: 0%"></div>
+            </div>
+          </div>
+        </div>
+        <button id="advertisementModalCancelButton" class="px-4 py-2 rounded-xl bg-violet-100 text-violet-700 font-semibold">キャンセル</button>
+        <button id="advertisementModalSubmitButton" class="px-4 py-2 rounded-xl bg-violet-600 text-white font-semibold hover:bg-violet-500">保存</button>
+      </div>
+    </div>
+  </div>
+  <div id="advertisementImagePreviewModal" class="modal-backdrop hidden">
+    <div class="w-full h-full p-4 flex flex-col gap-3">
+      <div class="flex justify-end">
+        <button id="advertisementImagePreviewCloseButton" class="px-3 py-1 rounded bg-violet-100 text-violet-700 text-sm font-semibold">閉じる</button>
+      </div>
+      <div class="flex-1 overflow-auto flex items-center justify-center">
+        <img id="advertisementImagePreviewLarge" class="max-w-full max-h-full object-contain" alt="advertisement-preview-large" />
+      </div>
+    </div>
+  </div>
+  <div id="advertisementConvertModal" class="modal-backdrop hidden">
+    <div class="card modal-card-scroll w-full max-w-3xl p-5 space-y-4">
+      <div class="flex items-center justify-between gap-3">
+        <div>
+          <h3 id="advertisementConvertModalTitle" class="text-lg font-bold">画像変換</h3>
+          <p id="advertisementConvertModalMeta" class="text-xs text-[color:var(--mgr-muted)]">-</p>
+        </div>
+        <button id="advertisementConvertModalCloseButton" class="px-3 py-1 rounded bg-violet-100 text-violet-700 text-sm font-semibold">閉じる</button>
+      </div>
+      <div class="flex flex-wrap gap-2">
+        <button id="advertisementConvertResizeButton" class="px-4 py-2 rounded-xl bg-violet-100 text-violet-700 font-semibold">4の倍数へ拡大して保存</button>
+        <button id="advertisementConvertClearButton" class="px-4 py-2 rounded-xl bg-red-100 text-red-700 font-semibold">変換データを清空</button>
+        <button id="advertisementConvertRunButton" class="px-4 py-2 rounded-xl bg-violet-600 text-white font-semibold hover:bg-violet-500">変換開始</button>
+      </div>
+      <div class="grid md:grid-cols-2 gap-3">
+        <label class="text-sm flex items-center gap-2">
+          <input id="advertisementConvertHasAlphaInput" type="checkbox" />
+          <span>透明ありとして変換する</span>
+        </label>
+        <div class="rounded-xl border border-[color:var(--mgr-border)] bg-white p-3">
+          <p class="text-sm font-semibold mb-2">使用エンコーダー</p>
+          <div id="advertisementConvertEncoderSummary" class="text-xs whitespace-pre-wrap text-[color:var(--mgr-text)]"></div>
+        </div>
+      </div>
+      <div id="advertisementConvertDownloadSection" class="hidden rounded-xl border border-[color:var(--mgr-border)] bg-white p-3 space-y-2">
+        <p class="text-sm font-semibold">変換済みバイナリをダウンロード</p>
+        <div class="flex flex-wrap gap-2">
+          <button id="advertisementConvertDownloadPcButton" class="hidden px-4 py-2 rounded-xl bg-sky-100 text-sky-700 font-semibold">PC をダウンロード</button>
+          <button id="advertisementConvertDownloadAndroidButton" class="hidden px-4 py-2 rounded-xl bg-emerald-100 text-emerald-700 font-semibold">Android をダウンロード</button>
+          <button id="advertisementConvertDownloadIosButton" class="hidden px-4 py-2 rounded-xl bg-amber-100 text-amber-700 font-semibold">iOS をダウンロード</button>
+        </div>
+      </div>
+      <div class="rounded-xl border border-[color:var(--mgr-border)] bg-violet-50 p-3 space-y-2">
+        <p class="text-sm font-semibold">変換ログ</p>
+        <pre id="advertisementConvertLog" class="text-xs whitespace-pre-wrap break-all text-[color:var(--mgr-text)] min-h-40 max-h-96 overflow-auto"></pre>
       </div>
     </div>
   </div>

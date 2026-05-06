@@ -51,6 +51,18 @@
   - PromotionList 更新 `/mgr/api/promotion/items/update`
   - PromotionList 削除 `/mgr/api/promotion/items/delete`
   - PromotionList 順序移動 `/mgr/api/promotion/items/move`（up/down）
+  - Advertisement 使用率取得 `/mgr/api/advertisement/usage`
+  - Advertisement Scope 一覧取得 `/mgr/api/advertisement/scopes`
+  - Advertisement Scope 追加 `/mgr/api/advertisement/scopes`
+  - Advertisement Scope 更新 `/mgr/api/advertisement/scopes/update`
+  - Advertisement Scope 削除 `/mgr/api/advertisement/scopes/delete`
+  - Advertisement gist 状態取得 `/mgr/api/advertisement/gist/status`
+  - Advertisement gist アップロード `/mgr/api/advertisement/gist/upload-platform`
+  - Advertisement 一覧取得 `/mgr/api/advertisement/items`
+  - Advertisement 追加 `/mgr/api/advertisement/items`
+  - Advertisement 更新 `/mgr/api/advertisement/items/update`
+  - Advertisement 削除 `/mgr/api/advertisement/items/delete`
+  - Advertisement 並び替え `/mgr/api/advertisement/items/reorder`
   - gist 一覧取得 `/mgr/api/gistfs/uploads`
   - gist 削除 `/mgr/api/gistfs/uploads/delete`
   - サービス説明取得 `/mgr/api/docs/ai` / `/mgr/api/docs/promotion`
@@ -76,6 +88,17 @@ PromotionList 仕様
 - 画像変換後の Base64 は自動で `Image` フィールドへ反映する
 - 圧縮後プレビューを表示し、ボタンから拡大モーダルで確認できる
 - MaxSize が 512 を超える選択時は警告文 `512を超える画像は容量を圧迫する可能性があります。` を表示する
+
+Advertisement 仕様
+- Advertisement は PromotionList と別サービスとして扱い、`Scope` 単位で項目と gistfs 配布先を分ける
+- Scope は `ScopeKey` と `Name` を持つ
+  - `ScopeKey` は gistfs ファイル名用の固定キーで、`a-z / 0-9 / _ / -` のみ許可する
+  - `Name` は管理画面表示用で、Scope 名変更時も `ScopeKey` は維持する
+- 項目は `Title / URL / Image` のみを持つ
+- 配布ファイル名は `adv_<scopeKey>_<platform>.json`
+- gistfs への upload は同じファイル名へ更新するため、同一 ScopeKey の URL を極力固定できる
+- 項目画像のアップロード/圧縮/4倍数補正/変換前チェック/プレビュー処理は PromotionList と同じ共通関数群を再利用する
+- 変換後データは `pc / android / ios` で保持し、Scope 単位の gist 状態表示・アップロードを行う
 
 保存方針
 - `service_config` に稼働設定を 1 行で保持
@@ -187,6 +210,7 @@ PromotionList 仕様
 - gistfs 接続は Cloudflare Workers VPC Service binding `VPC_SERVICE` を使う。Worker からは `env.VPC_SERVICE.fetch("http://localhost/...")` で呼び出し、実際の接続先 host/port は VPC Service 側設定に委ねる
 - gistfs への upload は `PUT /files/{path}/content` を使い、`env.VPC_SERVICE.fetch(...)` の body に `ReadableStream` を渡してメモリ負荷を抑える構成にした
 - Gist 管理面板は D1 を見ず gistfs API から直接一覧取得するため、削除や外部更新があっても PromotionList 面板の gist 状態と同期ズレしにくい。なお gistfs API には `updated_at` が無いため、厳密な最終更新日時は UI 上で「gistfs API 未提供」と表示する
+- 管理画面のクライアントスクリプト `src/managerAppScript.ts` は 2300 行超まで肥大化したため、文字列結合の形を保ったまま `src/managerAppScriptParts/` 配下へ `core / promotion / advertisement / lifecycle / bindings` の 5 分割に整理した。挙動変更ではなく配置整理を優先し、HTML 側の script 埋め込み方法は変えていない
 - 既存 migration SQL は手動適用済み前提のため、増分 0001-0009 は削除して `migrations/0001_schema_baseline.sql` へ統合した
 - baseline は最終スキーマだけを `CREATE TABLE IF NOT EXISTS` / `CREATE INDEX IF NOT EXISTS` / `INSERT OR IGNORE` で表現し、今後の新規環境構築を 1 ファイルで完了できるようにした
 - `wrangler.jsonc` の `migrations_dir` は再び `migrations` を使う構成へ戻した

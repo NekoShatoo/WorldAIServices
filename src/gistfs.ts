@@ -1,7 +1,8 @@
-import { getPromotionGistPath, getPromotionPlatformPayloadText } from './database';
-import { Env, GistfsFileMetadata, PromotionPlatform } from './types';
+import { getAdvertisementGistPath, getAdvertisementPlatformPayloadText, getPromotionGistPath, getPromotionPlatformPayloadText } from './database';
+import { AdvertisementPlatform, Env, GistfsFileMetadata, PromotionPlatform } from './types';
 
 const PROMOTION_GIST_SOURCE_KEY = 'PromotionList';
+const ADVERTISEMENT_GIST_SOURCE_KEY = 'Advertisement';
 
 interface GistfsResponsePayload {
 	path?: string;
@@ -65,6 +66,31 @@ export async function deleteGistfsFile(env: Env, path: string) {
 	};
 }
 
+export async function uploadAdvertisementPlatformToGistfs(env: Env, scopeKey: string, scopeId: string, platform: AdvertisementPlatform): Promise<GistfsFileMetadata> {
+	const path = getAdvertisementGistPath(scopeKey, platform);
+	const payloadText = await getAdvertisementPlatformPayloadText(env, scopeId, platform);
+	const response = await getGistfsBinding(env).fetch(`http://localhost/files/${encodeURIComponent(path)}/content`, {
+		method: 'PUT',
+		headers: {
+			'content-type': 'application/json; charset=UTF-8',
+			'x-gistfs-commit-message': `${path} を更新`,
+		},
+		body: new Blob([payloadText]).stream(),
+	});
+	const payload = await readGistfsResponsePayload(response);
+	if (!response.ok) throw new Error(buildGistfsErrorMessage('upload_failed', response.status, payload));
+	return {
+		path: String(payload.path ?? path),
+		size: normalizeGistfsNumber(payload.size, new TextEncoder().encode(payloadText).length),
+		sha256: String(payload.sha256 ?? ''),
+		rawUrl: String(payload.raw_url ?? ''),
+		mimeType: String(payload.mime_type ?? 'application/json'),
+		uploadedAt: String(payload.updated_at ?? ''),
+		sourceKey: ADVERTISEMENT_GIST_SOURCE_KEY,
+		platform,
+	};
+}
+
 export async function listGistfsFiles(env: Env): Promise<GistfsFileMetadata[]> {
 	const response = await getGistfsBinding(env).fetch('http://localhost/files', {
 		method: 'GET',
@@ -86,6 +112,18 @@ export async function getPromotionGistfsStatus(env: Env) {
 	};
 }
 
+export async function getAdvertisementGistfsStatus(env: Env, scopeKey: string) {
+	const platforms = {
+		pc: await getGistfsAdvertisementMetadata(env, scopeKey, 'pc'),
+		android: await getGistfsAdvertisementMetadata(env, scopeKey, 'android'),
+		ios: await getGistfsAdvertisementMetadata(env, scopeKey, 'ios'),
+	};
+	return {
+		sourceKey: ADVERTISEMENT_GIST_SOURCE_KEY,
+		platforms,
+	};
+}
+
 function getGistfsBinding(env: Env) {
 	if (!env.VPC_SERVICE) throw new Error('vpc_service_missing');
 	return env.VPC_SERVICE;
@@ -100,6 +138,17 @@ async function getGistfsPromotionMetadata(env: Env, platform: PromotionPlatform)
 	const payload = await readGistfsResponsePayload(response);
 	if (!response.ok) throw new Error(buildGistfsErrorMessage('metadata_failed', response.status, payload));
 	return normalizeGistfsMetadata(payload, PROMOTION_GIST_SOURCE_KEY, platform);
+}
+
+async function getGistfsAdvertisementMetadata(env: Env, scopeKey: string, platform: AdvertisementPlatform) {
+	const path = getAdvertisementGistPath(scopeKey, platform);
+	const response = await getGistfsBinding(env).fetch(`http://localhost/files/${encodeURIComponent(path)}`, {
+		method: 'GET',
+	});
+	if (response.status === 404) return null;
+	const payload = await readGistfsResponsePayload(response);
+	if (!response.ok) throw new Error(buildGistfsErrorMessage('metadata_failed', response.status, payload));
+	return normalizeGistfsMetadata(payload, ADVERTISEMENT_GIST_SOURCE_KEY, platform);
 }
 
 async function readGistfsResponsePayload(response: Response): Promise<GistfsResponsePayload> {
@@ -142,12 +191,17 @@ function normalizeGistfsMetadata(value: GistfsResponsePayload | NonNullable<Gist
 }
 
 function inferGistSourceKey(path: string) {
-	return path.startsWith('PromotionList.') ? PROMOTION_GIST_SOURCE_KEY : '';
+	if (path.startsWith('PromotionList.')) return PROMOTION_GIST_SOURCE_KEY;
+	if (path.startsWith('adv_')) return ADVERTISEMENT_GIST_SOURCE_KEY;
+	return '';
 }
 
 function inferPromotionPlatform(path: string): PromotionPlatform | '' {
 	if (path === 'PromotionList.pc.json') return 'pc';
 	if (path === 'PromotionList.android.json') return 'android';
 	if (path === 'PromotionList.ios.json') return 'ios';
+	if (path.startsWith('adv_') && path.endsWith('_pc.json')) return 'pc';
+	if (path.startsWith('adv_') && path.endsWith('_android.json')) return 'android';
+	if (path.startsWith('adv_') && path.endsWith('_ios.json')) return 'ios';
 	return '';
 }

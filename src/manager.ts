@@ -16,14 +16,29 @@ import {
 	savePromotionPlatformImage,
 	clearPromotionPlatformImages,
 	getPromotionPlatformBinary,
+	listAdvertisementScopes,
+	createAdvertisementScope,
+	updateAdvertisementScope,
+	deleteAdvertisementScope,
+	listAdvertisementItems,
+	createAdvertisementItem,
+	updateAdvertisementItem,
+	deleteAdvertisementItem,
+	reorderAdvertisementItems,
+	getAdvertisementItemById,
+	saveAdvertisementPlatformImage,
+	clearAdvertisementPlatformImages,
+	getAdvertisementPlatformBinary,
+	getAdvertisementUsage,
+	getAdvertisementScopeById,
 } from './database';
 import { TRANSLATION_PROMPT_VERSION } from './constants';
 import { jsonResponse, clampInteger, countCharacters } from './utils';
 import { requestAiTranslation } from './ai';
 import { executeTranslation } from './translation';
 import { convertPromotionImage } from './promotionCrunch';
-import { Env, PromotionItemType, PromotionPlatform } from './types';
-import { deleteGistfsFile, getPromotionGistfsStatus, listGistfsFiles, uploadPromotionPlatformToGistfs } from './gistfs';
+import { AdvertisementPlatform, Env, PromotionItemType, PromotionPlatform } from './types';
+import { deleteGistfsFile, getAdvertisementGistfsStatus, getPromotionGistfsStatus, listGistfsFiles, uploadAdvertisementPlatformToGistfs, uploadPromotionPlatformToGistfs } from './gistfs';
 
 const SESSION_TTL_SECONDS = 60 * 60 * 12;
 const TOKEN_VERSION = 'v1';
@@ -372,6 +387,199 @@ export async function handleManagerApi(request: Request, env: Env, ctx: Executio
 				'content-disposition': `attachment; filename="${binary.id}_${platform}.${binary.extension}"`,
 			},
 		});
+	}
+
+	if (path === '/advertisement/usage' && request.method === 'GET') {
+		return jsonResponse({ status: 'ok', result: await getAdvertisementUsage(env) });
+	}
+
+	if (path === '/advertisement/scopes' && request.method === 'GET') {
+		return jsonResponse({ status: 'ok', result: await listAdvertisementScopes(env) });
+	}
+
+	if (path === '/advertisement/scopes' && request.method === 'POST') {
+		const body = await readJsonBody(request);
+		const scopeKey = String(body?.scopeKey ?? '').trim();
+		const name = String(body?.name ?? '').trim();
+		if (!scopeKey) return jsonResponse({ status: 'error', result: 'scopeKey を指定してください。' }, 400);
+		if (!name) return jsonResponse({ status: 'error', result: 'name を指定してください。' }, 400);
+		try {
+			return jsonResponse({ status: 'ok', result: await createAdvertisementScope(env, scopeKey, name) });
+		} catch (error) {
+			if (error instanceof Error && error.message === 'advertisement_scope_key_invalid') return jsonResponse({ status: 'error', result: 'scopeKey は a-z / 0-9 / _ / - のみ使用できます。' }, 400);
+			if (error instanceof Error && error.message.includes('UNIQUE')) return jsonResponse({ status: 'error', result: 'scopeKey が重複しています。' }, 409);
+			throw error;
+		}
+	}
+
+	if (path === '/advertisement/scopes/update' && request.method === 'POST') {
+		const body = await readJsonBody(request);
+		const id = String(body?.id ?? '').trim();
+		const name = String(body?.name ?? '').trim();
+		if (!id) return jsonResponse({ status: 'error', result: 'id を指定してください。' }, 400);
+		if (!name) return jsonResponse({ status: 'error', result: 'name を指定してください。' }, 400);
+		return jsonResponse({ status: 'ok', result: await updateAdvertisementScope(env, id, name) });
+	}
+
+	if (path === '/advertisement/scopes/delete' && request.method === 'POST') {
+		const body = await readJsonBody(request);
+		const id = String(body?.id ?? '').trim();
+		if (!id) return jsonResponse({ status: 'error', result: 'id を指定してください。' }, 400);
+		await deleteAdvertisementScope(env, id);
+		return jsonResponse({ status: 'ok', result: true });
+	}
+
+	if (path === '/advertisement/items' && request.method === 'GET') {
+		const scopeId = String(url.searchParams.get('scopeId') ?? '').trim();
+		if (!scopeId) return jsonResponse({ status: 'error', result: 'scopeId を指定してください。' }, 400);
+		return jsonResponse({ status: 'ok', result: await listAdvertisementItems(env, scopeId) });
+	}
+
+	if (path === '/advertisement/items/detail' && request.method === 'GET') {
+		const id = String(url.searchParams.get('id') ?? '').trim();
+		if (!id) return jsonResponse({ status: 'error', result: 'id を指定してください。' }, 400);
+		const item = await getAdvertisementItemById(env, id);
+		if (!item) return jsonResponse({ status: 'error', result: 'not_found' }, 404);
+		return jsonResponse({ status: 'ok', result: item });
+	}
+
+	if (path === '/advertisement/items' && request.method === 'POST') {
+		const body = await readJsonBody(request);
+		const scopeId = String(body?.scopeId ?? '').trim();
+		if (!scopeId) return jsonResponse({ status: 'error', result: 'scopeId を指定してください。' }, 400);
+		const payload = {
+			ID: '',
+			Title: String(body?.item?.Title ?? '').trim(),
+			URL: String(body?.item?.URL ?? '').trim(),
+			Image: String(body?.item?.Image ?? '').trim(),
+		};
+		if (!payload.Title) return jsonResponse({ status: 'error', result: 'Title は必須です。' }, 400);
+		const predictedBytes = clampInteger(Number(body?.predictedBytes), 0, 200000000, 0);
+		try {
+			const created = await createAdvertisementItem(env, scopeId, payload as any, predictedBytes);
+			if (!created.ok) return jsonResponse({ status: 'error', result: 'Advertisement payload limit exceeded' }, 400);
+			return jsonResponse({ status: 'ok', result: created });
+		} catch (error) {
+			if (error instanceof Error && error.message === 'advertisement_payload_limit_exceeded') return jsonResponse({ status: 'error', result: 'Advertisement payload limit exceeded' }, 400);
+			throw error;
+		}
+	}
+
+	if (path === '/advertisement/items/update' && request.method === 'POST') {
+		const body = await readJsonBody(request);
+		const id = String(body?.id ?? '').trim();
+		if (!id) return jsonResponse({ status: 'error', result: 'id を指定してください。' }, 400);
+		const payload = {
+			ID: id,
+			Title: String(body?.item?.Title ?? '').trim(),
+			URL: String(body?.item?.URL ?? '').trim(),
+			Image: String(body?.item?.Image ?? '').trim(),
+		};
+		if (!payload.Title) return jsonResponse({ status: 'error', result: 'Title は必須です。' }, 400);
+		const predictedBytes = clampInteger(Number(body?.predictedBytes), 0, 200000000, 0);
+		try {
+			const updated = await updateAdvertisementItem(env, id, payload as any, predictedBytes);
+			if (!updated.ok) return jsonResponse({ status: 'error', result: 'Advertisement payload limit exceeded' }, 400);
+			return jsonResponse({ status: 'ok', result: updated.summary });
+		} catch (error) {
+			if (error instanceof Error && error.message === 'advertisement_payload_limit_exceeded') return jsonResponse({ status: 'error', result: 'Advertisement payload limit exceeded' }, 400);
+			throw error;
+		}
+	}
+
+	if (path === '/advertisement/items/delete' && request.method === 'POST') {
+		const body = await readJsonBody(request);
+		const id = String(body?.id ?? '').trim();
+		if (!id) return jsonResponse({ status: 'error', result: 'id を指定してください。' }, 400);
+		await deleteAdvertisementItem(env, id);
+		return jsonResponse({ status: 'ok', result: true });
+	}
+
+	if (path === '/advertisement/items/reorder' && request.method === 'POST') {
+		const body = await readJsonBody(request);
+		const scopeId = String(body?.scopeId ?? '').trim();
+		const orderedIds = Array.isArray(body?.orderedIds) ? body.orderedIds : [];
+		if (!scopeId) return jsonResponse({ status: 'error', result: 'scopeId を指定してください。' }, 400);
+		const reordered = await reorderAdvertisementItems(env, scopeId, orderedIds);
+		if (!reordered.ok) return jsonResponse({ status: 'error', result: '並び順データが不正です。' }, 400);
+		return jsonResponse({ status: 'ok', result: reordered.summary });
+	}
+
+	if (path === '/advertisement/items/convert' && request.method === 'POST') {
+		const body = await readJsonBody(request);
+		const id = String(body?.id ?? '').trim();
+		const platform = String(body?.platform ?? '').trim() as AdvertisementPlatform;
+		const hasAlpha = typeof body?.hasAlpha === 'boolean' ? body.hasAlpha : false;
+		const imageWidth = clampInteger(Number(body?.imageWidth), 0, 32768, 0);
+		const imageHeight = clampInteger(Number(body?.imageHeight), 0, 32768, 0);
+		if (!id) return jsonResponse({ status: 'error', result: 'id を指定してください。' }, 400);
+		if (platform !== 'pc' && platform !== 'android' && platform !== 'ios') return jsonResponse({ status: 'error', result: 'platform は pc/android/ios を指定してください。' }, 400);
+		if (imageWidth <= 0 || imageHeight <= 0) return jsonResponse({ status: 'error', result: 'imageWidth/imageHeight を指定してください。' }, 400);
+		const item = await getAdvertisementItemById(env, id);
+		if (!item) return jsonResponse({ status: 'error', result: 'not_found' }, 404);
+		if (!item.Image.trim()) return jsonResponse({ status: 'error', result: 'image_not_found' }, 400);
+		try {
+			const converted = await convertPromotionImage(env, platform, item.Image, hasAlpha, imageWidth, imageHeight);
+			const summary = await saveAdvertisementPlatformImage(env, id, platform, converted.base64, converted.imageWidth, converted.imageHeight, converted.textureFormat);
+			return jsonResponse({ status: 'ok', result: { platform, textureFormat: converted.textureFormat, outputFormat: converted.outputFormat, imageWidth: converted.imageWidth, imageHeight: converted.imageHeight, outputBytes: converted.outputBytes, contentType: converted.contentType, summary } });
+		} catch (error) {
+			const message = error instanceof Error ? error.message : String(error);
+			return jsonResponse({ status: 'error', result: message }, 502);
+		}
+	}
+
+	if (path === '/advertisement/items/clear-converted' && request.method === 'POST') {
+		const body = await readJsonBody(request);
+		const id = String(body?.id ?? '').trim();
+		if (!id) return jsonResponse({ status: 'error', result: 'id を指定してください。' }, 400);
+		const item = await getAdvertisementItemById(env, id);
+		if (!item) return jsonResponse({ status: 'error', result: 'not_found' }, 404);
+		const summary = await clearAdvertisementPlatformImages(env, id);
+		return jsonResponse({ status: 'ok', result: summary });
+	}
+
+	if (path === '/advertisement/items/download' && request.method === 'GET') {
+		const id = String(url.searchParams.get('id') ?? '').trim();
+		const platform = String(url.searchParams.get('platform') ?? '').trim() as AdvertisementPlatform;
+		if (!id) return jsonResponse({ status: 'error', result: 'id を指定してください。' }, 400);
+		if (platform !== 'pc' && platform !== 'android' && platform !== 'ios') return jsonResponse({ status: 'error', result: 'platform は pc/android/ios を指定してください。' }, 400);
+		const binary = await getAdvertisementPlatformBinary(env, id, platform);
+		if (!binary) return jsonResponse({ status: 'error', result: 'not_found' }, 404);
+		return new Response(base64ToUint8Array(binary.base64), {
+			status: 200,
+			headers: {
+				'content-type': binary.contentType,
+				'cache-control': 'no-store',
+				'content-disposition': `attachment; filename="${binary.id}_${platform}.${binary.extension}"`,
+			},
+		});
+	}
+
+	if (path === '/advertisement/gist/status' && request.method === 'GET') {
+		const scopeId = String(url.searchParams.get('scopeId') ?? '').trim();
+		if (!scopeId) return jsonResponse({ status: 'error', result: 'scopeId を指定してください。' }, 400);
+		const scope = await getAdvertisementScopeById(env, scopeId);
+		if (!scope) return jsonResponse({ status: 'error', result: 'not_found' }, 404);
+		try {
+			return jsonResponse({ status: 'ok', result: await getAdvertisementGistfsStatus(env, scope.ScopeKey) });
+		} catch (error) {
+			return jsonResponse({ status: 'error', result: normalizeGistfsManagerError(error) }, 502);
+		}
+	}
+
+	if (path === '/advertisement/gist/upload-platform' && request.method === 'POST') {
+		const body = await readJsonBody(request);
+		const scopeId = String(body?.scopeId ?? '').trim();
+		const platform = String(body?.platform ?? '').trim() as AdvertisementPlatform;
+		if (!scopeId) return jsonResponse({ status: 'error', result: 'scopeId を指定してください。' }, 400);
+		if (platform !== 'pc' && platform !== 'android' && platform !== 'ios') return jsonResponse({ status: 'error', result: 'platform は pc/android/ios を指定してください。' }, 400);
+		const scope = await getAdvertisementScopeById(env, scopeId);
+		if (!scope) return jsonResponse({ status: 'error', result: 'not_found' }, 404);
+		try {
+			return jsonResponse({ status: 'ok', result: await uploadAdvertisementPlatformToGistfs(env, scope.ScopeKey, scope.ID, platform) });
+		} catch (error) {
+			return jsonResponse({ status: 'error', result: normalizeGistfsManagerError(error) }, 502);
+		}
 	}
 
 	if (path === '/gistfs/uploads' && request.method === 'GET') {
