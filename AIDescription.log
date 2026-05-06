@@ -217,6 +217,7 @@ Advertisement 仕様
 - ログイン画面も同じ `MANAGER_COMMON_STYLE` の visual system に合わせ、入口と管理画面で見た目が分裂しないようにした
 - PromotionList 説明ページへ gistfs 配布 JSON の実ファイル名、トップレベル構造、項目フィールド、最小例を追加した。内容は現在の `buildPromotionPayloadBundleFromItems()` が生成する platform 別 payload に合わせている
 - Advertisement 説明ページを追加し、Scope ごとの gistfs ファイル名、トップレベル構造、項目フィールド、最小例を記載した。JSON 内容は Scope 情報を含めず、現在の `buildAdvertisementPayloadsForScopes()` が生成する `AdvertisementExportItem[]`（Title / Link / Image / ImageWidth / ImageHeight / ImageTextureFormat）に合わせている
+- D1 は 1 つの文字列/BLOB/行に 2MB 上限があるため、画像 Base64 を item テーブルの `image` / `image_pc` / `image_android` / `image_ios` に直接保存すると 2048px 級の画像で `SQLITE_TOOBIG` が発生する。PromotionList / Advertisement の原画像と変換済み platform 画像は `promotion_list_item_image_chunks` / `advertisement_item_image_chunks` へ 1.5MB 以下のチャンクで保存し、既存 image 列は旧データ互換 fallback としてのみ参照する構成へ変更した
 - 既存 migration SQL は手動適用済み前提のため、増分 0001-0009 は削除して `migrations/0001_schema_baseline.sql` へ統合した
 - baseline は最終スキーマだけを `CREATE TABLE IF NOT EXISTS` / `CREATE INDEX IF NOT EXISTS` / `INSERT OR IGNORE` で表現し、今後の新規環境構築を 1 ファイルで完了できるようにした
 - `wrangler.jsonc` の `migrations_dir` は再び `migrations` を使う構成へ戻した

@@ -30,6 +30,7 @@ export const DEFAULT_CONFIG: ServiceConfig = Object.freeze({
 const PROMOTION_LIST_MAX_BYTES = 100 * 1024 * 1024;
 const PROMOTION_LIST_CHUNK_SIZE = 900000;
 const ADVERTISEMENT_LIST_MAX_BYTES = 100 * 1024 * 1024;
+const ADVERTISEMENT_IMAGE_CHUNK_SIZE = 1500000;
 const PROMOTION_GIST_SOURCE_KEY = 'PromotionList';
 const ADVERTISEMENT_GIST_SOURCE_KEY = 'Advertisement';
 const EMPTY_PROMOTION_PAYLOAD: PromotionPayload = Object.freeze({ Avatar: [], World: [] });
@@ -45,6 +46,8 @@ const EMPTY_ADVERTISEMENT_PLATFORM_PAYLOAD_BUNDLE: AdvertisementPlatformPayloadB
 	ios: [],
 });
 const ADVERTISEMENT_PLATFORMS: AdvertisementPlatform[] = ['pc', 'android', 'ios'];
+type StoredImageKind = 'raw' | PromotionPlatform;
+type ImageChunkTableName = 'promotion_list_item_image_chunks' | 'advertisement_item_image_chunks';
 
 const PROMOTION_GIST_PATHS: Record<PromotionPlatform, string> = {
 	pc: 'PromotionList.pc.json',
@@ -485,9 +488,13 @@ export async function listPromotionItems(env: Env, itemType?: PromotionItemType)
       description,
       link,
       LENGTH(image) AS image_length,
+      COALESCE((SELECT SUM(LENGTH(chunk_text)) FROM promotion_list_item_image_chunks WHERE item_id = promotion_list_items.id AND image_kind = 'raw'), 0) AS image_chunk_length,
       LENGTH(image_pc) AS image_pc_length,
+      COALESCE((SELECT SUM(LENGTH(chunk_text)) FROM promotion_list_item_image_chunks WHERE item_id = promotion_list_items.id AND image_kind = 'pc'), 0) AS image_pc_chunk_length,
       LENGTH(image_android) AS image_android_length,
+      COALESCE((SELECT SUM(LENGTH(chunk_text)) FROM promotion_list_item_image_chunks WHERE item_id = promotion_list_items.id AND image_kind = 'android'), 0) AS image_android_chunk_length,
       LENGTH(image_ios) AS image_ios_length,
+      COALESCE((SELECT SUM(LENGTH(chunk_text)) FROM promotion_list_item_image_chunks WHERE item_id = promotion_list_items.id AND image_kind = 'ios'), 0) AS image_ios_chunk_length,
       updated_at,
       display_order
     FROM promotion_list_items
@@ -505,9 +512,13 @@ export async function listPromotionItems(env: Env, itemType?: PromotionItemType)
       description,
       link,
       LENGTH(image) AS image_length,
+      COALESCE((SELECT SUM(LENGTH(chunk_text)) FROM promotion_list_item_image_chunks WHERE item_id = promotion_list_items.id AND image_kind = 'raw'), 0) AS image_chunk_length,
       LENGTH(image_pc) AS image_pc_length,
+      COALESCE((SELECT SUM(LENGTH(chunk_text)) FROM promotion_list_item_image_chunks WHERE item_id = promotion_list_items.id AND image_kind = 'pc'), 0) AS image_pc_chunk_length,
       LENGTH(image_android) AS image_android_length,
+      COALESCE((SELECT SUM(LENGTH(chunk_text)) FROM promotion_list_item_image_chunks WHERE item_id = promotion_list_items.id AND image_kind = 'android'), 0) AS image_android_chunk_length,
       LENGTH(image_ios) AS image_ios_length,
+      COALESCE((SELECT SUM(LENGTH(chunk_text)) FROM promotion_list_item_image_chunks WHERE item_id = promotion_list_items.id AND image_kind = 'ios'), 0) AS image_ios_chunk_length,
       updated_at,
       display_order
     FROM promotion_list_items
@@ -525,7 +536,7 @@ export async function listPromotionItems(env: Env, itemType?: PromotionItemType)
 		DisplayOrder: safeMetricNumber(row.display_order),
 		ConvertedPlatforms: buildConvertedPlatformsFromRow(row),
 		IsImageConverted: hasAllConvertedPlatforms(row),
-		HasImage: safeMetricNumber(row.image_length) > 0,
+		HasImage: safeMetricNumber(row.image_length) > 0 || safeMetricNumber(row.image_chunk_length) > 0,
 	}));
 }
 
@@ -563,16 +574,18 @@ export async function createPromotionItem(
       display_order,
       created_at,
       updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, '', '', '', ?, ?, ?)`
+    ) VALUES (?, ?, ?, ?, ?, ?, '', '', '', '', ?, ?, ?)`
 	)
-		.bind(payload.ID, itemType, payload.Title, payload.Anchor, payload.Description, payload.Link, payload.Image, nextOrder, now, now)
+		.bind(payload.ID, itemType, payload.Title, payload.Anchor, payload.Description, payload.Link, nextOrder, now, now)
 		.run();
+	await saveItemImageChunks(env, 'promotion_list_item_image_chunks', payload.ID, 'raw', payload.Image);
 
 	const summary = await rebuildPromotionListCache(env);
 	return { ok: true as const, summary };
 }
 
 export async function deletePromotionItem(env: Env, id: string) {
+	await deleteItemImageChunks(env, 'promotion_list_item_image_chunks', id);
 	await env.STATE_DB.prepare('DELETE FROM promotion_list_items WHERE id = ?').bind(id).run();
 	return await rebuildPromotionListCache(env);
 }
@@ -598,16 +611,16 @@ export async function updatePromotionItem(
         anchor = ?,
         description = ?,
         link = ?,
-        image = ?,
-        image_pc = ?,
+        image = '',
+        image_pc = '',
         image_pc_width = ?,
         image_pc_height = ?,
         image_pc_texture_format = ?,
-        image_android = ?,
+        image_android = '',
         image_android_width = ?,
         image_android_height = ?,
         image_android_texture_format = ?,
-        image_ios = ?,
+        image_ios = '',
         image_ios_width = ?,
         image_ios_height = ?,
         image_ios_texture_format = ?,
@@ -620,16 +633,12 @@ export async function updatePromotionItem(
 			payload.Anchor,
 			payload.Description,
 			payload.Link,
-			payload.Image,
-			rawImageChanged ? '' : currentItem?.image_pc ?? '',
 			rawImageChanged ? 0 : safeMetricNumber(currentItem?.image_pc_width),
 			rawImageChanged ? 0 : safeMetricNumber(currentItem?.image_pc_height),
 			rawImageChanged ? '' : String(currentItem?.image_pc_texture_format ?? ''),
-			rawImageChanged ? '' : currentItem?.image_android ?? '',
 			rawImageChanged ? 0 : safeMetricNumber(currentItem?.image_android_width),
 			rawImageChanged ? 0 : safeMetricNumber(currentItem?.image_android_height),
 			rawImageChanged ? '' : String(currentItem?.image_android_texture_format ?? ''),
-			rawImageChanged ? '' : currentItem?.image_ios ?? '',
 			rawImageChanged ? 0 : safeMetricNumber(currentItem?.image_ios_width),
 			rawImageChanged ? 0 : safeMetricNumber(currentItem?.image_ios_height),
 			rawImageChanged ? '' : String(currentItem?.image_ios_texture_format ?? ''),
@@ -637,6 +646,10 @@ export async function updatePromotionItem(
 			id
 		)
 		.run();
+	if (rawImageChanged) {
+		await saveItemImageChunks(env, 'promotion_list_item_image_chunks', id, 'raw', payload.Image);
+		await deleteItemImageChunks(env, 'promotion_list_item_image_chunks', id, ['pc', 'android', 'ios']);
+	}
 
 	const summary = await rebuildPromotionListCache(env);
 	return { ok: true as const, summary };
@@ -922,7 +935,10 @@ async function buildPromotionPayloadBundleFromItems(env: Env, targetPlatforms: P
 	).all<any>();
 	const payloadBundle = clonePromotionPlatformPayloadBundle(EMPTY_PROMOTION_PLATFORM_PAYLOAD_BUNDLE);
 	const platformSet = new Set(targetPlatforms);
+	const itemIds = (result.results ?? []).map((row) => String(row.id ?? '')).filter((id) => id.length > 0);
+	const imagesByItemId = await loadItemImagesFromChunks(env, 'promotion_list_item_image_chunks', itemIds);
 	for (const row of result.results ?? []) {
+		const itemImages = imagesByItemId[String(row.id ?? '')] ?? {};
 		const baseItem = {
 			ID: String(row.id ?? ''),
 			Title: String(row.title ?? ''),
@@ -935,7 +951,7 @@ async function buildPromotionPayloadBundleFromItems(env: Env, targetPlatforms: P
 		if (platformSet.has('pc')) {
 			payloadBundle.pc[type].push({
 				...baseItem,
-				Image: String(row.image_pc ?? ''),
+				Image: itemImages.pc || String(row.image_pc ?? ''),
 				ImageWidth: safeMetricNumber(row.image_pc_width),
 				ImageHeight: safeMetricNumber(row.image_pc_height),
 				ImageTextureFormat: String(row.image_pc_texture_format ?? ''),
@@ -944,7 +960,7 @@ async function buildPromotionPayloadBundleFromItems(env: Env, targetPlatforms: P
 		if (platformSet.has('android')) {
 			payloadBundle.android[type].push({
 				...baseItem,
-				Image: String(row.image_android ?? ''),
+				Image: itemImages.android || String(row.image_android ?? ''),
 				ImageWidth: safeMetricNumber(row.image_android_width),
 				ImageHeight: safeMetricNumber(row.image_android_height),
 				ImageTextureFormat: String(row.image_android_texture_format ?? ''),
@@ -953,7 +969,7 @@ async function buildPromotionPayloadBundleFromItems(env: Env, targetPlatforms: P
 		if (platformSet.has('ios')) {
 			payloadBundle.ios[type].push({
 				...baseItem,
-				Image: String(row.image_ios ?? ''),
+				Image: itemImages.ios || String(row.image_ios ?? ''),
 				ImageWidth: safeMetricNumber(row.image_ios_width),
 				ImageHeight: safeMetricNumber(row.image_ios_height),
 				ImageTextureFormat: String(row.image_ios_texture_format ?? ''),
@@ -1130,9 +1146,9 @@ function clonePromotionPlatformPayloadBundle(payloadBundle: PromotionPlatformPay
 
 function buildConvertedPlatformsFromRow(row: any): PromotionPlatform[] {
 	const platforms: PromotionPlatform[] = [];
-	if (safeMetricNumber(row?.image_pc_length) > 0) platforms.push('pc');
-	if (safeMetricNumber(row?.image_android_length) > 0) platforms.push('android');
-	if (safeMetricNumber(row?.image_ios_length) > 0) platforms.push('ios');
+	if (safeMetricNumber(row?.image_pc_length) > 0 || safeMetricNumber(row?.image_pc_chunk_length) > 0) platforms.push('pc');
+	if (safeMetricNumber(row?.image_android_length) > 0 || safeMetricNumber(row?.image_android_chunk_length) > 0) platforms.push('android');
+	if (safeMetricNumber(row?.image_ios_length) > 0 || safeMetricNumber(row?.image_ios_chunk_length) > 0) platforms.push('ios');
 	return platforms;
 }
 
@@ -1141,7 +1157,7 @@ function hasAllConvertedPlatforms(row: any) {
 }
 
 async function loadPromotionItemRecordById(env: Env, id: string) {
-	return await env.STATE_DB.prepare(
+	const row = await env.STATE_DB.prepare(
 		`SELECT
       id,
       item_type,
@@ -1169,6 +1185,16 @@ async function loadPromotionItemRecordById(env: Env, id: string) {
 	)
 		.bind(id)
 		.first<any>();
+	if (!row) return null;
+	const images = await loadItemImagesFromChunks(env, 'promotion_list_item_image_chunks', [id]);
+	const itemImages = images[id] ?? {};
+	return {
+		...row,
+		image: itemImages.raw || String(row.image ?? ''),
+		image_pc: itemImages.pc || String(row.image_pc ?? ''),
+		image_android: itemImages.android || String(row.image_android ?? ''),
+		image_ios: itemImages.ios || String(row.image_ios ?? ''),
+	};
 }
 
 export async function getPromotionItemById(env: Env, id: string) {
@@ -1225,15 +1251,16 @@ export async function savePromotionPlatformImage(
 	const columnNames = columnNameByPlatform[platform];
 	await env.STATE_DB.prepare(
 		`UPDATE promotion_list_items
-    SET ${columnNames.image} = ?,
+    SET ${columnNames.image} = '',
         ${columnNames.width} = ?,
         ${columnNames.height} = ?,
         ${columnNames.textureFormat} = ?,
         updated_at = ?
     WHERE id = ?`
 	)
-		.bind(convertedImageBase64, imageWidth, imageHeight, textureFormat, new Date().toISOString(), id)
+		.bind(imageWidth, imageHeight, textureFormat, new Date().toISOString(), id)
 		.run();
+	await saveItemImageChunks(env, 'promotion_list_item_image_chunks', id, platform, convertedImageBase64);
 	return await rebuildPromotionListCache(env, [platform]);
 }
 
@@ -1257,6 +1284,7 @@ export async function clearPromotionPlatformImages(env: Env, id: string) {
 	)
 		.bind(new Date().toISOString(), id)
 		.run();
+	await deleteItemImageChunks(env, 'promotion_list_item_image_chunks', id, ['pc', 'android', 'ios']);
 	return await rebuildPromotionListCache(env);
 }
 
@@ -1347,6 +1375,12 @@ export async function updateAdvertisementScope(env: Env, id: string, name: strin
 }
 
 export async function deleteAdvertisementScope(env: Env, id: string) {
+	await env.STATE_DB.prepare(
+		`DELETE FROM advertisement_item_image_chunks
+    WHERE item_id IN (SELECT id FROM advertisement_items WHERE scope_id = ?)`
+	)
+		.bind(id)
+		.run();
 	await env.STATE_DB.batch([
 		env.STATE_DB.prepare('DELETE FROM advertisement_platform_cache_chunks WHERE scope_id = ?').bind(id),
 		env.STATE_DB.prepare('DELETE FROM advertisement_platform_cache WHERE scope_id = ?').bind(id),
@@ -1373,9 +1407,13 @@ export async function listAdvertisementItems(env: Env, scopeId: string): Promise
       title,
       url,
       LENGTH(image) AS image_length,
+      COALESCE((SELECT SUM(LENGTH(chunk_text)) FROM advertisement_item_image_chunks WHERE item_id = advertisement_items.id AND image_kind = 'raw'), 0) AS image_chunk_length,
       LENGTH(image_pc) AS image_pc_length,
+      COALESCE((SELECT SUM(LENGTH(chunk_text)) FROM advertisement_item_image_chunks WHERE item_id = advertisement_items.id AND image_kind = 'pc'), 0) AS image_pc_chunk_length,
       LENGTH(image_android) AS image_android_length,
+      COALESCE((SELECT SUM(LENGTH(chunk_text)) FROM advertisement_item_image_chunks WHERE item_id = advertisement_items.id AND image_kind = 'android'), 0) AS image_android_chunk_length,
       LENGTH(image_ios) AS image_ios_length,
+      COALESCE((SELECT SUM(LENGTH(chunk_text)) FROM advertisement_item_image_chunks WHERE item_id = advertisement_items.id AND image_kind = 'ios'), 0) AS image_ios_chunk_length,
       updated_at,
       display_order
     FROM advertisement_items
@@ -1393,7 +1431,7 @@ export async function listAdvertisementItems(env: Env, scopeId: string): Promise
 		DisplayOrder: safeMetricNumber(row.display_order),
 		ConvertedPlatforms: buildConvertedPlatformsFromRow(row),
 		IsImageConverted: hasAllConvertedPlatforms(row),
-		HasImage: safeMetricNumber(row.image_length) > 0,
+		HasImage: safeMetricNumber(row.image_length) > 0 || safeMetricNumber(row.image_chunk_length) > 0,
 	}));
 }
 
@@ -1416,8 +1454,9 @@ export async function createAdvertisementItem(env: Env, scopeId: string, payload
       id, scope_id, title, url, image, image_pc, image_android, image_ios, display_order, created_at, updated_at
     ) VALUES (?, ?, ?, ?, ?, '', '', '', ?, ?, ?)`
 	)
-		.bind(id, scopeId, payload.Title.trim(), payload.URL.trim(), payload.Image.trim(), nextOrder, now, now)
+		.bind(id, scopeId, payload.Title.trim(), payload.URL.trim(), '', nextOrder, now, now)
 		.run();
+	await saveItemImageChunks(env, 'advertisement_item_image_chunks', id, 'raw', payload.Image.trim());
 	const summary = await rebuildAdvertisementCache(env, [scopeId]);
 	return { ok: true as const, summary, id };
 }
@@ -1433,7 +1472,7 @@ export async function updateAdvertisementItem(env: Env, id: string, payload: Adv
 		`UPDATE advertisement_items
     SET title = ?,
         url = ?,
-        image = ?,
+        image = '',
         image_pc = ?,
         image_pc_width = ?,
         image_pc_height = ?,
@@ -1452,7 +1491,6 @@ export async function updateAdvertisementItem(env: Env, id: string, payload: Adv
 		.bind(
 			payload.Title.trim(),
 			payload.URL.trim(),
-			payload.Image.trim(),
 			rawImageChanged ? '' : String(currentItem.image_pc ?? ''),
 			rawImageChanged ? 0 : safeMetricNumber(currentItem.image_pc_width),
 			rawImageChanged ? 0 : safeMetricNumber(currentItem.image_pc_height),
@@ -1469,6 +1507,10 @@ export async function updateAdvertisementItem(env: Env, id: string, payload: Adv
 			id
 		)
 		.run();
+	if (rawImageChanged) {
+		await saveItemImageChunks(env, 'advertisement_item_image_chunks', id, 'raw', payload.Image.trim());
+		await deleteItemImageChunks(env, 'advertisement_item_image_chunks', id, ['pc', 'android', 'ios']);
+	}
 	const summary = await rebuildAdvertisementCache(env, [String(currentItem.scope_id ?? '')]);
 	return { ok: true as const, summary };
 }
@@ -1476,6 +1518,7 @@ export async function updateAdvertisementItem(env: Env, id: string, payload: Adv
 export async function deleteAdvertisementItem(env: Env, id: string) {
 	const currentItem = await loadAdvertisementItemRecordById(env, id);
 	if (!currentItem) return;
+	await deleteItemImageChunks(env, 'advertisement_item_image_chunks', id);
 	await env.STATE_DB.prepare('DELETE FROM advertisement_items WHERE id = ?').bind(id).run();
 	await rebuildAdvertisementCache(env, [String(currentItem.scope_id ?? '')]);
 }
@@ -1543,15 +1586,16 @@ export async function saveAdvertisementPlatformImage(
 	const columnNames = columnNameByPlatform[platform];
 	await env.STATE_DB.prepare(
 		`UPDATE advertisement_items
-    SET ${columnNames.image} = ?,
+    SET ${columnNames.image} = '',
         ${columnNames.width} = ?,
         ${columnNames.height} = ?,
         ${columnNames.textureFormat} = ?,
         updated_at = ?
     WHERE id = ?`
 	)
-		.bind(convertedImageBase64, imageWidth, imageHeight, textureFormat, new Date().toISOString(), id)
+		.bind(imageWidth, imageHeight, textureFormat, new Date().toISOString(), id)
 		.run();
+	await saveItemImageChunks(env, 'advertisement_item_image_chunks', id, platform, convertedImageBase64);
 	return await rebuildAdvertisementCache(env, [String(currentItem.scope_id ?? '')], [platform]);
 }
 
@@ -1577,6 +1621,7 @@ export async function clearAdvertisementPlatformImages(env: Env, id: string) {
 	)
 		.bind(new Date().toISOString(), id)
 		.run();
+	await deleteItemImageChunks(env, 'advertisement_item_image_chunks', id, ['pc', 'android', 'ios']);
 	return await rebuildAdvertisementCache(env, [String(currentItem.scope_id ?? '')]);
 }
 
@@ -1685,6 +1730,8 @@ async function buildAdvertisementPayloadsForScopes(env: Env, scopeIds: string[],
 	)
 		.bind(...scopeIds)
 		.all<any>();
+	const itemIds = (rows.results ?? []).map((row) => String(row.id ?? '')).filter((id) => id.length > 0);
+	const imagesByItemId = await loadItemImagesFromChunks(env, 'advertisement_item_image_chunks', itemIds);
 	const payloadByScopePlatform = new Map<string, AdvertisementExportItem[]>();
 	for (const scope of validScopes) {
 		for (const platform of targetPlatforms) payloadByScopePlatform.set(`${scope.ID}:${platform}`, buildEmptyAdvertisementPayload());
@@ -1692,6 +1739,7 @@ async function buildAdvertisementPayloadsForScopes(env: Env, scopeIds: string[],
 	for (const row of rows.results ?? []) {
 		const scopeId = String(row.scope_id ?? '');
 		if (!scopeIdSet.has(scopeId)) continue;
+		const itemImages = imagesByItemId[String(row.id ?? '')] ?? {};
 		for (const platform of targetPlatforms) {
 			const targetPayload = payloadByScopePlatform.get(`${scopeId}:${platform}`);
 			if (!targetPayload) continue;
@@ -1699,7 +1747,11 @@ async function buildAdvertisementPayloadsForScopes(env: Env, scopeIds: string[],
 				Title: String(row.title ?? ''),
 				Link: String(row.url ?? ''),
 				Image:
-					platform === 'pc' ? String(row.image_pc ?? '') : platform === 'android' ? String(row.image_android ?? '') : String(row.image_ios ?? ''),
+					platform === 'pc'
+						? itemImages.pc || String(row.image_pc ?? '')
+						: platform === 'android'
+							? itemImages.android || String(row.image_android ?? '')
+							: itemImages.ios || String(row.image_ios ?? ''),
 				ImageWidth:
 					platform === 'pc' ? safeMetricNumber(row.image_pc_width) : platform === 'android' ? safeMetricNumber(row.image_android_width) : safeMetricNumber(row.image_ios_width),
 				ImageHeight:
@@ -1777,8 +1829,61 @@ function buildEmptyAdvertisementPayload(): AdvertisementExportItem[] {
 	return [];
 }
 
+async function loadItemImagesFromChunks(env: Env, tableName: ImageChunkTableName, itemIds: string[]) {
+	const normalizedIds = itemIds.map((id) => String(id ?? '').trim()).filter((id, index, array) => id.length > 0 && array.indexOf(id) === index);
+	const imagesByItemId: Record<string, Partial<Record<StoredImageKind, string>>> = {};
+	if (normalizedIds.length === 0) return imagesByItemId;
+	for (let offset = 0; offset < normalizedIds.length; offset += 80) {
+		const ids = normalizedIds.slice(offset, offset + 80);
+		const result = await env.STATE_DB.prepare(
+			`SELECT item_id, image_kind, chunk_text
+      FROM ${tableName}
+      WHERE item_id IN (${ids.map(() => '?').join(', ')})
+      ORDER BY item_id ASC, image_kind ASC, chunk_index ASC`
+		)
+			.bind(...ids)
+			.all<any>();
+		for (const row of result.results ?? []) {
+			const itemId = String(row.item_id ?? '');
+			const imageKind = String(row.image_kind ?? '') as StoredImageKind;
+			if (!itemId || !isStoredImageKind(imageKind)) continue;
+			if (!imagesByItemId[itemId]) imagesByItemId[itemId] = {};
+			imagesByItemId[itemId][imageKind] = String(imagesByItemId[itemId][imageKind] ?? '') + String(row.chunk_text ?? '');
+		}
+	}
+	return imagesByItemId;
+}
+
+async function saveItemImageChunks(env: Env, tableName: ImageChunkTableName, itemId: string, imageKind: StoredImageKind, imageBase64: string) {
+	if (!isStoredImageKind(imageKind)) throw new Error('invalid_image_kind');
+	const chunks = splitAdvertisementImagePayload(imageBase64);
+	const statements = [env.STATE_DB.prepare(`DELETE FROM ${tableName} WHERE item_id = ? AND image_kind = ?`).bind(itemId, imageKind)];
+	for (const [chunkIndex, chunkText] of chunks.entries()) {
+		if (chunkText.length === 0) continue;
+		statements.push(
+			env.STATE_DB.prepare(`INSERT INTO ${tableName} (item_id, image_kind, chunk_index, chunk_text) VALUES (?, ?, ?, ?)`).bind(itemId, imageKind, chunkIndex, chunkText)
+		);
+	}
+	await env.STATE_DB.batch(statements);
+}
+
+async function deleteItemImageChunks(env: Env, tableName: ImageChunkTableName, itemId: string, imageKinds?: StoredImageKind[]) {
+	const normalizedKinds = (imageKinds ?? []).filter(isStoredImageKind);
+	if (normalizedKinds.length === 0) {
+		await env.STATE_DB.prepare(`DELETE FROM ${tableName} WHERE item_id = ?`).bind(itemId).run();
+		return;
+	}
+	await env.STATE_DB.prepare(`DELETE FROM ${tableName} WHERE item_id = ? AND image_kind IN (${normalizedKinds.map(() => '?').join(', ')})`)
+		.bind(itemId, ...normalizedKinds)
+		.run();
+}
+
+function isStoredImageKind(value: string): value is StoredImageKind {
+	return value === 'raw' || value === 'pc' || value === 'android' || value === 'ios';
+}
+
 async function loadAdvertisementItemRecordById(env: Env, id: string) {
-	return await env.STATE_DB.prepare(
+	const row = await env.STATE_DB.prepare(
 		`SELECT
       id, scope_id, title, url, image,
       image_pc, image_pc_width, image_pc_height, image_pc_texture_format,
@@ -1790,6 +1895,25 @@ async function loadAdvertisementItemRecordById(env: Env, id: string) {
 	)
 		.bind(id)
 		.first<any>();
+	if (!row) return null;
+	const images = await loadItemImagesFromChunks(env, 'advertisement_item_image_chunks', [id]);
+	const itemImages = images[id] ?? {};
+	return {
+		...row,
+		image: itemImages.raw || String(row.image ?? ''),
+		image_pc: itemImages.pc || String(row.image_pc ?? ''),
+		image_android: itemImages.android || String(row.image_android ?? ''),
+		image_ios: itemImages.ios || String(row.image_ios ?? ''),
+	};
+}
+
+function splitAdvertisementImagePayload(payloadText: string) {
+	if (payloadText.length <= ADVERTISEMENT_IMAGE_CHUNK_SIZE) return [payloadText];
+	const chunks: string[] = [];
+	for (let index = 0; index < payloadText.length; index += ADVERTISEMENT_IMAGE_CHUNK_SIZE) {
+		chunks.push(payloadText.slice(index, index + ADVERTISEMENT_IMAGE_CHUNK_SIZE));
+	}
+	return chunks;
 }
 
 function normalizeAdvertisementScopeKey(value: string) {
