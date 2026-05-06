@@ -212,7 +212,7 @@ Advertisement 仕様
 - Gist 管理面板は D1 を見ず gistfs API から直接一覧取得するため、削除や外部更新があっても PromotionList 面板の gist 状態と同期ズレしにくい。なお gistfs API には `updated_at` が無いため、厳密な最終更新日時は UI 上で「gistfs API 未提供」と表示する
 - 管理画面のクライアントスクリプト `src/managerAppScript.ts` は 2300 行超まで肥大化したため、文字列結合の形を保ったまま `src/managerAppScriptParts/` 配下へ `core / promotion / advertisement / lifecycle / bindings` の 5 分割に整理した。挙動変更ではなく配置整理を優先し、HTML 側の script 埋め込み方法は変えていない
 - 管理画面 UI は将来の管理対象追加に備えて `src/managerAppPageParts/` へ分割した。`managerAppPage.ts` は shell 組み立てだけにし、AI / PromotionList / Advertisement / Gist / Modal / 共通部品を別ファイルへ分けた
-- UI 見た目は運用管理向けの軽量な構成へ変更した。紫色中心のカードUIをやめ、固定サイドバー・薄い surface・低い影・小さめの角丸・中立色 + teal 系アクセントへ変更し、既存の DOM id と manager script のバインド互換性は維持した
+- UI 見た目は運用管理向けの軽量な構成へ変更した。固定サイドバー・薄い surface・低い影・小さめの角丸を維持しつつ、テーマカラーは紫系へ戻した。サイドバーの通常ボタンは濃紫背景に淡紫文字、選択中は白背景に紫文字で明確に判別できるようにした
 - Tailwind CDN への依存をやめ、管理画面で実際に使う utility だけを `MANAGER_COMMON_STYLE` 内に持つ方式へ変更した。外部依存はグラフ表示用の Chart.js のみに残している
 - ログイン画面も同じ `MANAGER_COMMON_STYLE` の visual system に合わせ、入口と管理画面で見た目が分裂しないようにした
 - 既存 migration SQL は手動適用済み前提のため、増分 0001-0009 は削除して `migrations/0001_schema_baseline.sql` へ統合した

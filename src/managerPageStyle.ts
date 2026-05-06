@@ -3,22 +3,22 @@ export const MANAGER_COMMON_STYLE = `
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
   <style>
     :root {
-      --mgr-bg: #f5f7f8;
+      --mgr-bg: #f7f3ff;
       --mgr-surface: #ffffff;
-      --mgr-surface-soft: #eef4f4;
-      --mgr-border: #d7e1e0;
-      --mgr-primary: #0f766e;
-      --mgr-primary-hover: #115e59;
-      --mgr-primary-soft: #dff3f0;
-      --mgr-text: #172121;
-      --mgr-muted: #64706f;
+      --mgr-surface-soft: #f2ecff;
+      --mgr-border: #ded3f7;
+      --mgr-primary: #7c3aed;
+      --mgr-primary-hover: #6d28d9;
+      --mgr-primary-soft: #eee7ff;
+      --mgr-text: #2d2244;
+      --mgr-muted: #706286;
       --mgr-danger: #b42318;
       --mgr-danger-soft: #fee4e2;
       --mgr-warning: #a15c07;
       --mgr-warning-soft: #fff4d6;
       --mgr-info: #155eef;
       --mgr-info-soft: #eaf1ff;
-      --mgr-shadow: 0 1px 2px rgba(23, 33, 33, 0.08);
+      --mgr-shadow: 0 1px 2px rgba(45, 34, 68, 0.08);
     }
     * { box-sizing: border-box; }
     body {
@@ -41,22 +41,22 @@ export const MANAGER_COMMON_STYLE = `
       top: 0;
       height: 100vh;
       overflow-y: auto;
-      border-right: 1px solid var(--mgr-border);
-      background: #10201f;
-      color: #f7fbfa;
+      border-right: 1px solid #2b1c4d;
+      background: #2b184d;
+      color: #f7f2ff;
       padding: 18px 14px;
     }
     .brand-block {
       padding: 8px 8px 18px;
-      border-bottom: 1px solid rgba(255,255,255,0.12);
+      border-bottom: 1px solid rgba(255,255,255,0.14);
       margin-bottom: 14px;
     }
     .brand-title { font-size: 18px; font-weight: 750; line-height: 1.2; }
-    .brand-subtitle { margin-top: 4px; font-size: 12px; color: #a9bcba; }
-    .nav-group { padding: 10px 0; border-bottom: 1px solid rgba(255,255,255,0.1); }
+    .brand-subtitle { margin-top: 4px; font-size: 12px; color: #cbbdf1; }
+    .nav-group { padding: 10px 0; border-bottom: 1px solid rgba(255,255,255,0.12); }
     .nav-group-title {
       padding: 0 8px 6px;
-      color: #a9bcba;
+      color: #cbbdf1;
       font-size: 11px;
       font-weight: 700;
       text-transform: uppercase;
@@ -68,18 +68,23 @@ export const MANAGER_COMMON_STYLE = `
       border-radius: 6px;
       padding: 8px 10px;
       font-size: 14px;
-      color: #e8f2f1;
-      transition: background 0.12s ease, color 0.12s ease;
+      background: transparent;
+      color: #d8cef4;
+      transition: background 0.12s ease, color 0.12s ease, box-shadow 0.12s ease;
     }
-    .nav-item:hover { background: rgba(255,255,255,0.08); }
-    .nav-item.active { background: var(--mgr-primary); color: #ffffff; }
+    .nav-item:hover { background: rgba(255,255,255,0.11); color: #ffffff; }
+    .nav-item.active {
+      background: #ffffff;
+      color: #4c1d95;
+      box-shadow: inset 3px 0 0 #a78bfa;
+    }
     .logout-button {
       width: calc(100% - 16px);
       margin: 16px 8px 0;
       padding: 9px 10px;
       border-radius: 6px;
-      background: rgba(255,255,255,0.08);
-      color: #f7fbfa;
+      background: rgba(255,255,255,0.11);
+      color: #f7f2ff;
       font-size: 13px;
       font-weight: 700;
     }
@@ -129,7 +134,7 @@ export const MANAGER_COMMON_STYLE = `
       color: var(--mgr-text);
       outline: none;
     }
-    .field-input:focus { border-color: var(--mgr-primary); box-shadow: 0 0 0 3px rgba(15,118,110,0.14); }
+    .field-input:focus { border-color: var(--mgr-primary); box-shadow: 0 0 0 3px rgba(124,58,237,0.14); }
     .span-2 { grid-column: span 2 / span 2; }
     .span-3 { grid-column: span 3 / span 3; }
     .button-row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
@@ -152,7 +157,7 @@ export const MANAGER_COMMON_STYLE = `
     .btn-primary:hover { background: var(--mgr-primary-hover); }
     .btn-soft, .bg-violet-100 {
       background: var(--mgr-primary-soft) !important;
-      color: #0d5f59 !important;
+      color: #5b21b6 !important;
     }
     .btn-info, .bg-sky-600 {
       background: var(--mgr-info) !important;
@@ -162,7 +167,7 @@ export const MANAGER_COMMON_STYLE = `
       background: var(--mgr-danger-soft) !important;
       color: var(--mgr-danger) !important;
     }
-    .text-violet-700 { color: #0d5f59 !important; }
+    .text-violet-700 { color: #5b21b6 !important; }
     .border-violet-100 { border-color: rgba(255,255,255,0.12) !important; }
     .border-violet-400 { border-color: var(--mgr-primary) !important; }
     .bg-violet-50 { background: var(--mgr-surface-soft) !important; }
@@ -172,7 +177,7 @@ export const MANAGER_COMMON_STYLE = `
       padding: 2px 9px;
       font-size: 12px;
       background: var(--mgr-primary-soft);
-      color: #0d5f59;
+      color: #5b21b6;
     }
     .progress-row { display: grid; gap: 8px; }
     .progress-label {
@@ -187,7 +192,7 @@ export const MANAGER_COMMON_STYLE = `
       height: 8px;
       overflow: hidden;
       border-radius: 999px;
-      background: #e7eeee;
+      background: #ece4fb;
     }
     .progress-track > div { height: 100%; }
     .log-box {
@@ -196,7 +201,7 @@ export const MANAGER_COMMON_STYLE = `
       overflow: auto;
       border: 1px solid var(--mgr-border);
       border-radius: 8px;
-      background: #f8fbfb;
+      background: #faf8ff;
       padding: 10px;
       color: var(--mgr-text);
       font-size: 12px;
@@ -206,7 +211,7 @@ export const MANAGER_COMMON_STYLE = `
     .modal-backdrop {
       position: fixed;
       inset: 0;
-      background: rgba(12, 25, 24, 0.44);
+      background: rgba(38, 21, 65, 0.46);
       display: flex;
       align-items: center;
       justify-content: center;
@@ -223,7 +228,7 @@ export const MANAGER_COMMON_STYLE = `
       display: flex;
       align-items: center;
       justify-content: center;
-      background: rgba(245, 247, 248, 0.76);
+      background: rgba(247, 243, 255, 0.76);
       backdrop-filter: blur(3px);
       z-index: 80;
       padding: 16px;
@@ -238,7 +243,7 @@ export const MANAGER_COMMON_STYLE = `
       width: 34px;
       height: 34px;
       border-radius: 999px;
-      border: 3px solid #cfe0de;
+      border: 3px solid #ddd0ff;
       border-top-color: var(--mgr-primary);
       animation: mgr-spin 0.85s linear infinite;
     }
