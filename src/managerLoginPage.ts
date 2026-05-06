@@ -2,19 +2,21 @@ import { MANAGER_COMMON_STYLE } from './managerPageStyle';
 
 export function buildManagerLoginPageHtml() {
 	return `<!doctype html><html lang="ja"><head><meta charset="UTF-8" /><meta name="viewport" content="width=device-width, initial-scale=1.0" /><title>Manager Login</title>${MANAGER_COMMON_STYLE}</head>
-<body class="font-sans">
+<body>
   <main class="min-h-screen flex items-center justify-center px-4">
-    <section class="card w-full max-w-md p-6 space-y-4">
-      <h1 class="text-2xl font-bold">管理画面ログイン</h1>
-      <p class="text-sm text-[color:var(--mgr-muted)]">World AI Services /mgr</p>
-      <label class="block text-sm font-semibold">管理パスワード</label>
-      <input id="passwordInput" type="password" class="w-full border rounded-xl px-3 py-2 border-[color:var(--mgr-border)] focus:outline-none focus:ring-2 focus:ring-violet-400" />
-      <button id="loginButton" class="w-full px-4 py-2 rounded-xl bg-violet-600 text-white font-semibold hover:bg-violet-500">ログイン</button>
+    <section class="surface w-full max-w-md p-6 space-y-4">
+      <div>
+        <h1 class="panel-title">管理画面ログイン</h1>
+        <p class="panel-subtitle">World AI Services /mgr</p>
+      </div>
+      <label class="field-label">管理パスワード</label>
+      <input id="passwordInput" type="password" class="field-input" />
+      <button id="loginButton" class="btn btn-primary w-full">ログイン</button>
       <p id="notice" class="text-sm text-[color:var(--mgr-muted)]"></p>
     </section>
   </main>
   <div id="loginLoadingOverlay" class="loading-overlay hidden" aria-live="polite" aria-busy="true">
-    <div class="card w-full max-w-sm p-5 flex items-center gap-4">
+    <div class="surface w-full max-w-sm p-5 flex items-center gap-4">
       <div class="loading-spinner flex-shrink-0"></div>
       <div class="min-w-0">
         <p class="text-sm font-semibold">処理中</p>
