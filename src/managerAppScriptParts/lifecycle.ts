@@ -1,4 +1,63 @@
 export const MANAGER_APP_SCRIPT_LIFECYCLE = `
+    async function exportMigrationJson() {
+      beginGlobalLoading("移行 JSON をエクスポートしています...");
+      try {
+        const response = await fetch("/mgr/api/migration/export", {
+          method: "GET",
+          headers: { authorization: "Bearer " + state.token },
+        });
+        const data = await response.json().catch(() => ({ status: "error", result: "Invalid JSON" }));
+        if (response.status === 401) {
+          localStorage.removeItem("mgr_token");
+          location.href = "/mgr";
+          return;
+        }
+        if (data.status !== "ok") {
+          alert(String(data.result || "エクスポートに失敗しました。"));
+          return;
+        }
+        const payloadText = JSON.stringify(data.result, null, 2);
+        const blobUrl = URL.createObjectURL(new Blob([payloadText], { type: "application/json" }));
+        const link = document.createElement("a");
+        link.href = blobUrl;
+        link.download = "world-ai-services-non-ai-" + new Date().toISOString().replace(/[:.]/g, "-") + ".json";
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+        URL.revokeObjectURL(blobUrl);
+      } finally {
+        endGlobalLoading();
+      }
+    }
+
+    async function importMigrationJsonFromFile(file) {
+      if (!file) return;
+      if (!confirm("PromotionList / Advertisement の現在データを、選択した JSON の内容で置き換えます。続行しますか？")) return;
+      beginGlobalLoading("移行 JSON をインポートしています...");
+      try {
+        const data = JSON.parse(await file.text());
+        const result = (await callApi("/migration/import", {
+          method: "POST",
+          body: JSON.stringify({ data }),
+          loadingMessage: "移行 JSON をインポートしています...",
+          skipGlobalLoading: true,
+        })).data;
+        if (result.status !== "ok") {
+          alert(String(result.result || "インポートに失敗しました。"));
+          return;
+        }
+        invalidatePanels(PANEL_KEYS.dashboard, PANEL_KEYS.promotionManage, PANEL_KEYS.advertisementManage, PANEL_KEYS.gistManage);
+        if (!ui.panels[PANEL_KEYS.promotionManage].classList.contains("hidden")) await refreshPromotionManagePanel();
+        if (!ui.panels[PANEL_KEYS.advertisementManage].classList.contains("hidden")) await refreshAdvertisementManagePanel();
+        alert("インポート完了: PromotionList " + result.result.promotionItems + " 件 / Advertisement " + result.result.advertisementItems + " 件");
+      } catch (error) {
+        console.error("[mgr] migration import failed", error);
+        alert("インポートに失敗しました。JSON 形式または内容を確認してください。");
+      } finally {
+        endGlobalLoading();
+      }
+    }
+
     const panelLoaders = {
       [PANEL_KEYS.dashboard]: loadDashboard,
       [PANEL_KEYS.aiConfig]: loadStatus,

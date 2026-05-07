@@ -219,6 +219,9 @@ Advertisement 仕様
 - PromotionList 面板の初回表示も、使用率 / 一覧の読み込みを先に完了させ、gistfs 状態取得は待たずにバックグラウンドで更新するようにした。Gistfs 配布セクションだけが局所 loading になる
 - Advertisement 追加/更新 modal は送信成功後に submit/cancel/close ボタンの disabled 状態を必ず解除するようにした。成功時に `closeAdvertisementModal()` だけで閉じると次回 open 時にボタンが灰色のまま残る問題を修正した
 - Advertisement 項目には任意の `Group` 文字列を追加した。管理画面では `grp_...` のような任意値を入力でき、DB では `advertisement_items.group_name` に保存し、gistfs 用 JSON では各 item に `Group` を空文字込みで出力する
+- 非AIデータ移行用に `/mgr/api/migration/export` と `/mgr/api/migration/import` を追加した。対象は PromotionList / Advertisement の item・scope・image chunk・platform cache・Promotion API 設定で、翻訳キャッシュ・統計・AI設定は含めない
+- 移行 JSON の import は置き換え方式で、PromotionList / Advertisement 関連テーブルを削除してから JSON 内容を挿入する。画像 Base64 は chunk 表の内容をそのまま保持するため、原画像と pc/android/ios 変換済みデータも移行対象になる
+- 管理画面の PromotionList / Advertisement 項目管理に「データ移行」セクションを追加し、同じ移行 JSON を export / import できるようにした
 - PromotionList 追加/更新 modal も送信処理を `finally` で囲み、通信例外や更新途中の例外でも submit/cancel/close ボタンが disabled のまま残らないようにした
 - Dashboard 初期読込は `/stats` や使用率 API の戻り値が欠けていても JS 例外で管理画面全体が止まらないようにした。chart と使用率表示は欠損時に 0 扱いで描画する
 - ログイン画面も同じ `MANAGER_COMMON_STYLE` の visual system に合わせ、入口と管理画面で見た目が分裂しないようにした

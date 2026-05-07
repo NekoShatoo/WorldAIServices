@@ -1,4 +1,4 @@
-import { buildGistDistributionSection, buildPanelHeader, buildPlatformUsage } from './shared';
+import { buildGistDistributionSection, buildMigrationSection, buildPanelHeader, buildPlatformUsage } from './shared';
 
 export function buildAdvertisementPanel() {
 	const actions = `<div class="button-row">
@@ -11,6 +11,7 @@ export function buildAdvertisementPanel() {
   ${buildPanelHeader('Advertisement / 項目管理', 'Scope ごとの広告項目を編集し、分区ごとに gistfs へ配布します。', actions)}
   <div class="section-stack">
     ${buildPlatformUsage('advertisement')}
+    ${buildMigrationSection('advertisement')}
     ${buildGistDistributionSection({
 		statusListId: 'advertisementGistStatusList',
 		uploadButtonId: 'advertisementGistUploadButton',

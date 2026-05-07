@@ -60,6 +60,23 @@ export function buildGistDistributionSection(config: {
 </section>`;
 }
 
+export function buildMigrationSection(prefix: 'promotion' | 'advertisement') {
+	const textPrefix = prefix === 'promotion' ? 'promotion' : 'advertisement';
+	return `<section class="surface">
+  <div class="section-header">
+    <div>
+      <h3 class="text-sm font-semibold">データ移行</h3>
+      <p class="text-xs text-[color:var(--mgr-muted)]">PromotionList / Advertisement の全データを JSON で export / import します。</p>
+    </div>
+    <div class="button-row">
+      <button id="${textPrefix}MigrationExportButton" class="btn btn-soft">JSON をエクスポート</button>
+      <button id="${textPrefix}MigrationImportButton" class="btn btn-danger">JSON をインポート</button>
+      <input id="${textPrefix}MigrationImportInput" type="file" accept="application/json,.json" class="hidden" />
+    </div>
+  </div>
+</section>`;
+}
+
 export function buildImagePreviewModal(prefix: 'promotion' | 'advertisement') {
 	const label = prefix === 'promotion' ? 'promotion' : 'advertisement';
 	return `<div id="${prefix}ImagePreviewModal" class="modal-backdrop hidden">

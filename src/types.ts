@@ -184,3 +184,23 @@ export interface GistfsFileMetadata {
 	sourceKey: string;
 	platform: PromotionPlatform | '';
 }
+
+export interface NonAiMigrationData {
+	schemaVersion: 1;
+	exportedAt: string;
+	source: 'WorldAIServices';
+	promotion: {
+		apiConfig: any[];
+		items: any[];
+		imageChunks: any[];
+		platformCache: any[];
+		platformCacheChunks: any[];
+	};
+	advertisement: {
+		scopes: any[];
+		items: any[];
+		imageChunks: any[];
+		platformCache: any[];
+		platformCacheChunks: any[];
+	};
+}

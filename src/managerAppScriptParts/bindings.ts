@@ -2,6 +2,12 @@ export const MANAGER_APP_SCRIPT_BINDINGS = `
     function bindPromotionEvents() {
       ui.promotionItemsList.addEventListener("click", handlePromotionListClick);
       ui.promotionCreateOpenButton.addEventListener("click", async () => await openPromotionModal(PROMOTION_MODAL_MODE.create));
+      ui.promotionMigrationExportButton.addEventListener("click", exportMigrationJson);
+      ui.promotionMigrationImportButton.addEventListener("click", () => ui.promotionMigrationImportInput.click());
+      ui.promotionMigrationImportInput.addEventListener("change", async () => {
+        await importMigrationJsonFromFile(ui.promotionMigrationImportInput.files && ui.promotionMigrationImportInput.files[0]);
+        ui.promotionMigrationImportInput.value = "";
+      });
       ui.promotionGistUploadButton.addEventListener("click", uploadPromotionGists);
       ui.promotionGistLogClearButton.addEventListener("click", () => {
         ui.promotionGistUploadLog.textContent = "";
@@ -114,6 +120,12 @@ export const MANAGER_APP_SCRIPT_BINDINGS = `
     function bindAdvertisementEvents() {
       ui.advertisementItemsList.addEventListener("click", handleAdvertisementListClick);
       ui.advertisementCreateOpenButton.addEventListener("click", async () => await openAdvertisementModal(PROMOTION_MODAL_MODE.create));
+      ui.advertisementMigrationExportButton.addEventListener("click", exportMigrationJson);
+      ui.advertisementMigrationImportButton.addEventListener("click", () => ui.advertisementMigrationImportInput.click());
+      ui.advertisementMigrationImportInput.addEventListener("change", async () => {
+        await importMigrationJsonFromFile(ui.advertisementMigrationImportInput.files && ui.advertisementMigrationImportInput.files[0]);
+        ui.advertisementMigrationImportInput.value = "";
+      });
       ui.advertisementReloadButton.addEventListener("click", async () => await refreshAdvertisementManagePanel());
       ui.advertisementScopeSelect.addEventListener("change", async () => {
         state.advertisementScopeId = ui.advertisementScopeSelect.value;

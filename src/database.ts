@@ -17,6 +17,7 @@ import {
 	AdvertisementPlatform,
 	AdvertisementExportItem,
 	AdvertisementPlatformPayloadBundle,
+	NonAiMigrationData,
 } from './types';
 import { clampInteger, safeMetricNumber, parseStoredJsonObject, MAINTENANCE_BATCH_SIZE } from './utils';
 
@@ -46,6 +47,7 @@ const EMPTY_ADVERTISEMENT_PLATFORM_PAYLOAD_BUNDLE: AdvertisementPlatformPayloadB
 	ios: [],
 });
 const ADVERTISEMENT_PLATFORMS: AdvertisementPlatform[] = ['pc', 'android', 'ios'];
+const MIGRATION_IMPORT_BATCH_SIZE = 40;
 type StoredImageKind = 'raw' | PromotionPlatform;
 type ImageChunkTableName = 'promotion_list_item_image_chunks' | 'advertisement_item_image_chunks';
 
@@ -474,6 +476,299 @@ export async function resetTranslationCache(env: Env, triggeredByUserId: string)
 		details: { deletedCount, triggeredByUserId },
 		occurredAt: new Date().toISOString(),
 	});
+}
+
+export async function exportNonAiMigrationData(env: Env): Promise<NonAiMigrationData> {
+	const db = env.STATE_DB;
+	const [
+		promotionApiConfig,
+		promotionItems,
+		promotionImageChunks,
+		promotionPlatformCache,
+		promotionPlatformCacheChunks,
+		advertisementScopes,
+		advertisementItems,
+		advertisementImageChunks,
+		advertisementPlatformCache,
+		advertisementPlatformCacheChunks,
+	] = await Promise.all([
+		selectAllRows(db, 'SELECT config_id, include_image_in_response, updated_at FROM promotion_api_config ORDER BY config_id ASC'),
+		selectAllRows(
+			db,
+			`SELECT
+      id, item_type, title, anchor, description, link, image,
+      image_pc, image_pc_width, image_pc_height, image_pc_texture_format,
+      image_android, image_android_width, image_android_height, image_android_texture_format,
+      image_ios, image_ios_width, image_ios_height, image_ios_texture_format,
+      display_order, created_at, updated_at
+    FROM promotion_list_items
+    ORDER BY item_type ASC, display_order ASC, updated_at DESC, id ASC`
+		),
+		selectAllRows(db, 'SELECT item_id, image_kind, chunk_index, chunk_text FROM promotion_list_item_image_chunks ORDER BY item_id ASC, image_kind ASC, chunk_index ASC'),
+		selectAllRows(db, 'SELECT platform, payload_bytes, payload_updated_at FROM promotion_list_platform_cache ORDER BY platform ASC'),
+		selectAllRows(db, 'SELECT platform, chunk_index, chunk_text FROM promotion_list_platform_cache_chunks ORDER BY platform ASC, chunk_index ASC'),
+		selectAllRows(db, 'SELECT id, scope_key, name, created_at, updated_at FROM advertisement_scopes ORDER BY scope_key ASC, id ASC'),
+		selectAllRows(
+			db,
+			`SELECT
+      id, scope_id, title, group_name, url, image,
+      image_pc, image_pc_width, image_pc_height, image_pc_texture_format,
+      image_android, image_android_width, image_android_height, image_android_texture_format,
+      image_ios, image_ios_width, image_ios_height, image_ios_texture_format,
+      display_order, created_at, updated_at
+    FROM advertisement_items
+    ORDER BY scope_id ASC, display_order ASC, updated_at DESC, id ASC`
+		),
+		selectAllRows(db, 'SELECT item_id, image_kind, chunk_index, chunk_text FROM advertisement_item_image_chunks ORDER BY item_id ASC, image_kind ASC, chunk_index ASC'),
+		selectAllRows(db, 'SELECT scope_id, platform, payload_bytes, payload_updated_at FROM advertisement_platform_cache ORDER BY scope_id ASC, platform ASC'),
+		selectAllRows(db, 'SELECT scope_id, platform, chunk_index, chunk_text FROM advertisement_platform_cache_chunks ORDER BY scope_id ASC, platform ASC, chunk_index ASC'),
+	]);
+
+	return {
+		schemaVersion: 1,
+		exportedAt: new Date().toISOString(),
+		source: 'WorldAIServices',
+		promotion: {
+			apiConfig: promotionApiConfig,
+			items: promotionItems,
+			imageChunks: promotionImageChunks,
+			platformCache: promotionPlatformCache,
+			platformCacheChunks: promotionPlatformCacheChunks,
+		},
+		advertisement: {
+			scopes: advertisementScopes,
+			items: advertisementItems,
+			imageChunks: advertisementImageChunks,
+			platformCache: advertisementPlatformCache,
+			platformCacheChunks: advertisementPlatformCacheChunks,
+		},
+	};
+}
+
+export async function importNonAiMigrationData(env: Env, data: unknown) {
+	if (!isNonAiMigrationData(data)) throw new Error('invalid_migration_json');
+	const db = env.STATE_DB;
+	const statements: D1PreparedStatement[] = [];
+	for (const row of data.promotion.apiConfig) {
+		statements.push(
+			db.prepare('INSERT INTO promotion_api_config (config_id, include_image_in_response, updated_at) VALUES (?, ?, ?)').bind(
+				toInteger(row.config_id, 1),
+				toInteger(row.include_image_in_response, 1),
+				toText(row.updated_at)
+			)
+		);
+	}
+	for (const row of data.promotion.items) statements.push(buildPromotionItemInsertStatement(db, row));
+	for (const row of data.promotion.imageChunks) statements.push(buildItemImageChunkInsertStatement(db, 'promotion_list_item_image_chunks', row));
+	for (const row of data.promotion.platformCache) {
+		statements.push(
+			db.prepare('INSERT INTO promotion_list_platform_cache (platform, payload_bytes, payload_updated_at) VALUES (?, ?, ?)').bind(
+				toPlatform(row.platform),
+				toInteger(row.payload_bytes, 0),
+				toText(row.payload_updated_at)
+			)
+		);
+	}
+	for (const row of data.promotion.platformCacheChunks) {
+		statements.push(
+			db.prepare('INSERT INTO promotion_list_platform_cache_chunks (platform, chunk_index, chunk_text) VALUES (?, ?, ?)').bind(
+				toPlatform(row.platform),
+				toInteger(row.chunk_index, 0),
+				toText(row.chunk_text)
+			)
+		);
+	}
+	for (const row of data.advertisement.scopes) {
+		statements.push(
+			db.prepare('INSERT INTO advertisement_scopes (id, scope_key, name, created_at, updated_at) VALUES (?, ?, ?, ?, ?)').bind(
+				toText(row.id),
+				toText(row.scope_key),
+				toText(row.name),
+				toText(row.created_at),
+				toText(row.updated_at)
+			)
+		);
+	}
+	for (const row of data.advertisement.items) statements.push(buildAdvertisementItemInsertStatement(db, row));
+	for (const row of data.advertisement.imageChunks) statements.push(buildItemImageChunkInsertStatement(db, 'advertisement_item_image_chunks', row));
+	for (const row of data.advertisement.platformCache) {
+		statements.push(
+			db.prepare('INSERT INTO advertisement_platform_cache (scope_id, platform, payload_bytes, payload_updated_at) VALUES (?, ?, ?, ?)').bind(
+				toText(row.scope_id),
+				toPlatform(row.platform),
+				toInteger(row.payload_bytes, 0),
+				toText(row.payload_updated_at)
+			)
+		);
+	}
+	for (const row of data.advertisement.platformCacheChunks) {
+		statements.push(
+			db.prepare('INSERT INTO advertisement_platform_cache_chunks (scope_id, platform, chunk_index, chunk_text) VALUES (?, ?, ?, ?)').bind(
+				toText(row.scope_id),
+				toPlatform(row.platform),
+				toInteger(row.chunk_index, 0),
+				toText(row.chunk_text)
+			)
+		);
+	}
+	await runImportBatch(db, [
+		db.prepare('DELETE FROM promotion_list_item_image_chunks'),
+		db.prepare('DELETE FROM promotion_list_platform_cache_chunks'),
+		db.prepare('DELETE FROM promotion_list_platform_cache'),
+		db.prepare('DELETE FROM promotion_list_items'),
+		db.prepare('DELETE FROM promotion_api_config'),
+		db.prepare('DELETE FROM advertisement_item_image_chunks'),
+		db.prepare('DELETE FROM advertisement_platform_cache_chunks'),
+		db.prepare('DELETE FROM advertisement_platform_cache'),
+		db.prepare('DELETE FROM advertisement_items'),
+		db.prepare('DELETE FROM advertisement_scopes'),
+	]);
+	await runImportBatch(db, statements);
+
+	return {
+		promotionItems: data.promotion.items.length,
+		promotionImageChunks: data.promotion.imageChunks.length,
+		advertisementScopes: data.advertisement.scopes.length,
+		advertisementItems: data.advertisement.items.length,
+		advertisementImageChunks: data.advertisement.imageChunks.length,
+	};
+}
+
+async function selectAllRows(db: D1Database, sql: string) {
+	const result = await db.prepare(sql).all<any>();
+	return result.results ?? [];
+}
+
+function isNonAiMigrationData(value: any): value is NonAiMigrationData {
+	return (
+		value &&
+		typeof value === 'object' &&
+		value.schemaVersion === 1 &&
+		value.source === 'WorldAIServices' &&
+		hasMigrationSection(value.promotion, ['apiConfig', 'items', 'imageChunks', 'platformCache', 'platformCacheChunks']) &&
+		hasMigrationSection(value.advertisement, ['scopes', 'items', 'imageChunks', 'platformCache', 'platformCacheChunks'])
+	);
+}
+
+function hasMigrationSection(section: any, keys: string[]) {
+	if (!section || typeof section !== 'object') return false;
+	return keys.every((key) => Array.isArray(section[key]));
+}
+
+async function runImportBatch(db: D1Database, statements: D1PreparedStatement[]) {
+	for (let offset = 0; offset < statements.length; offset += MIGRATION_IMPORT_BATCH_SIZE) {
+		const chunk = statements.slice(offset, offset + MIGRATION_IMPORT_BATCH_SIZE);
+		if (chunk.length > 0) await db.batch(chunk);
+	}
+}
+
+function buildPromotionItemInsertStatement(db: D1Database, row: any) {
+	return db
+		.prepare(
+			`INSERT INTO promotion_list_items (
+      id, item_type, title, anchor, description, link, image,
+      image_pc, image_pc_width, image_pc_height, image_pc_texture_format,
+      image_android, image_android_width, image_android_height, image_android_texture_format,
+      image_ios, image_ios_width, image_ios_height, image_ios_texture_format,
+      display_order, created_at, updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+		)
+		.bind(
+			toText(row.id),
+			toPromotionItemType(row.item_type),
+			toText(row.title),
+			toText(row.anchor),
+			toText(row.description),
+			toText(row.link),
+			toText(row.image),
+			toText(row.image_pc),
+			toInteger(row.image_pc_width, 0),
+			toInteger(row.image_pc_height, 0),
+			toText(row.image_pc_texture_format),
+			toText(row.image_android),
+			toInteger(row.image_android_width, 0),
+			toInteger(row.image_android_height, 0),
+			toText(row.image_android_texture_format),
+			toText(row.image_ios),
+			toInteger(row.image_ios_width, 0),
+			toInteger(row.image_ios_height, 0),
+			toText(row.image_ios_texture_format),
+			toInteger(row.display_order, 0),
+			toText(row.created_at),
+			toText(row.updated_at)
+		);
+}
+
+function buildAdvertisementItemInsertStatement(db: D1Database, row: any) {
+	return db
+		.prepare(
+			`INSERT INTO advertisement_items (
+      id, scope_id, title, group_name, url, image,
+      image_pc, image_pc_width, image_pc_height, image_pc_texture_format,
+      image_android, image_android_width, image_android_height, image_android_texture_format,
+      image_ios, image_ios_width, image_ios_height, image_ios_texture_format,
+      display_order, created_at, updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+		)
+		.bind(
+			toText(row.id),
+			toText(row.scope_id),
+			toText(row.title),
+			toText(row.group_name),
+			toText(row.url),
+			toText(row.image),
+			toText(row.image_pc),
+			toInteger(row.image_pc_width, 0),
+			toInteger(row.image_pc_height, 0),
+			toText(row.image_pc_texture_format),
+			toText(row.image_android),
+			toInteger(row.image_android_width, 0),
+			toInteger(row.image_android_height, 0),
+			toText(row.image_android_texture_format),
+			toText(row.image_ios),
+			toInteger(row.image_ios_width, 0),
+			toInteger(row.image_ios_height, 0),
+			toText(row.image_ios_texture_format),
+			toInteger(row.display_order, 0),
+			toText(row.created_at),
+			toText(row.updated_at)
+		);
+}
+
+function buildItemImageChunkInsertStatement(db: D1Database, tableName: ImageChunkTableName, row: any) {
+	return db.prepare(`INSERT INTO ${tableName} (item_id, image_kind, chunk_index, chunk_text) VALUES (?, ?, ?, ?)`).bind(
+		toText(row.item_id),
+		toImageKind(row.image_kind),
+		toInteger(row.chunk_index, 0),
+		toText(row.chunk_text)
+	);
+}
+
+function toText(value: any) {
+	return String(value ?? '');
+}
+
+function toInteger(value: any, fallback: number) {
+	const parsed = Number(value);
+	return Number.isFinite(parsed) ? Math.floor(parsed) : fallback;
+}
+
+function toPlatform(value: any): PromotionPlatform {
+	const text = String(value ?? '');
+	if (text === 'pc' || text === 'android' || text === 'ios') return text;
+	throw new Error('invalid_platform');
+}
+
+function toImageKind(value: any): StoredImageKind {
+	const text = String(value ?? '');
+	if (isStoredImageKind(text)) return text;
+	throw new Error('invalid_image_kind');
+}
+
+function toPromotionItemType(value: any): PromotionItemType {
+	const text = String(value ?? '');
+	if (text === 'Avatar' || text === 'World') return text;
+	throw new Error('invalid_promotion_item_type');
 }
 
 export async function listPromotionItems(env: Env, itemType?: PromotionItemType) {

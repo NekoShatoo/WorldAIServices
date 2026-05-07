@@ -1,4 +1,4 @@
-import { buildGistDistributionSection, buildPanelHeader, buildPlatformUsage } from './shared';
+import { buildGistDistributionSection, buildMigrationSection, buildPanelHeader, buildPlatformUsage } from './shared';
 
 export function buildPromotionPanel() {
 	const actions = `<div class="button-row">
@@ -17,6 +17,7 @@ export function buildPromotionPanel() {
   <p id="promotionSortHint" class="hidden mt-3 text-xs text-[color:var(--mgr-muted)]">並び替え編集中です。項目をドラッグして順番を調整し、最後に保存してください。</p>
   <div class="section-stack">
     ${buildPlatformUsage('promotion')}
+    ${buildMigrationSection('promotion')}
     ${buildGistDistributionSection({
 		statusListId: 'promotionGistStatusList',
 		uploadButtonId: 'promotionGistUploadButton',

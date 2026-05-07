@@ -31,6 +31,8 @@ import {
 	getAdvertisementPlatformBinary,
 	getAdvertisementUsage,
 	getAdvertisementScopeById,
+	exportNonAiMigrationData,
+	importNonAiMigrationData,
 } from './database';
 import { TRANSLATION_PROMPT_VERSION } from './constants';
 import { jsonResponse, clampInteger, countCharacters } from './utils';
@@ -196,6 +198,23 @@ export async function handleManagerApi(request: Request, env: Env, ctx: Executio
 	if (path === '/resetcache' && request.method === 'POST') {
 		ctx.waitUntil(resetTranslationCache(env, 'manager'));
 		return jsonResponse({ status: 'ok', result: 'translation_cache のレコード削除を開始しました。' });
+	}
+
+	if (path === '/migration/export' && request.method === 'GET') {
+		return jsonResponse({ status: 'ok', result: await exportNonAiMigrationData(env) });
+	}
+
+	if (path === '/migration/import' && request.method === 'POST') {
+		const body = await readJsonBody(request);
+		try {
+			return jsonResponse({ status: 'ok', result: await importNonAiMigrationData(env, body?.data) });
+		} catch (error) {
+			if (error instanceof Error && error.message === 'invalid_migration_json') return jsonResponse({ status: 'error', result: 'migration JSON が不正です。' }, 400);
+			if (error instanceof Error && (error.message === 'invalid_platform' || error.message === 'invalid_image_kind' || error.message === 'invalid_promotion_item_type')) {
+				return jsonResponse({ status: 'error', result: 'migration JSON 内の値が不正です。' }, 400);
+			}
+			throw error;
+		}
 	}
 
 	if (path === '/promotion/usage' && request.method === 'GET') {
