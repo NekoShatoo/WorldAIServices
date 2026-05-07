@@ -1,9 +1,5 @@
 import { MANAGER_APP_SCRIPT } from './managerAppScript';
-import { buildAdvertisementPanel } from './managerAppPageParts/advertisement';
 import { buildAiConfigPanel, buildAiOperationPanel, buildAiToolsPanel, buildDashboardPanel, buildDocsPanels } from './managerAppPageParts/ai';
-import { buildGistPanel } from './managerAppPageParts/gist';
-import { buildManagerModals } from './managerAppPageParts/modals';
-import { buildPromotionPanel } from './managerAppPageParts/promotion';
 import { MANAGER_COMMON_STYLE } from './managerPageStyle';
 
 export function buildManagerAppPageHtml() {
@@ -18,14 +14,10 @@ export function buildManagerAppPageHtml() {
       ${buildAiConfigPanel()}
       ${buildAiOperationPanel()}
       ${buildAiToolsPanel()}
-      ${buildPromotionPanel()}
-      ${buildAdvertisementPanel()}
-      ${buildGistPanel()}
       ${buildDocsPanels()}
       ${buildGlobalLoadingOverlay()}
     </main>
   </div>
-  ${buildManagerModals()}
   <script>${MANAGER_APP_SCRIPT}</script>
 </body></html>`;
 }
@@ -47,20 +39,6 @@ function buildSidebar() {
       <button class="nav-item" data-panel="ai-operation">運用操作</button>
       <button class="nav-item" data-panel="ai-tools">AI疎通 / simulate</button>
       <button class="nav-item" data-panel="docs-ai">説明ページ</button>
-    </div>
-    <div class="nav-group">
-      <p class="nav-group-title">PromotionList</p>
-      <button class="nav-item" data-panel="promotion-manage">項目管理</button>
-      <button class="nav-item" data-panel="docs-promotion">説明ページ</button>
-    </div>
-    <div class="nav-group">
-      <p class="nav-group-title">Advertisement</p>
-      <button class="nav-item" data-panel="advertisement-manage">項目管理</button>
-      <button class="nav-item" data-panel="docs-advertisement">説明ページ</button>
-    </div>
-    <div class="nav-group">
-      <p class="nav-group-title">Gistfs</p>
-      <button class="nav-item" data-panel="gist-manage">Gist 管理</button>
     </div>
   </nav>
   <button id="logoutButton" class="logout-button">ログアウト</button>

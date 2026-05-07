@@ -4,5 +4,3 @@ AI_API_URL=https://generativelanguage.googleapis.com/v1beta/openai
 AI_API_KEY=your-api-key
 AI_MODEL=gemini-3.1-flash-lite-preview
 MGR_PASSWORD=replace-with-manager-password
-CRUNCH_API_URL=https://skr.25-ji.com/api/crunch/
-CRUNCH_API_TOKEN=replace-with-crunch-api-token

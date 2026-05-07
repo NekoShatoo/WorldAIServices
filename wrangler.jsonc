@@ -54,13 +54,6 @@
 			}
 		]
 	},
-	"vpc_services": [
-		{
-			"binding": "VPC_SERVICE",
-			"service_id": "019dfc2c-184b-7cd1-af81-45f8931fa0c3",
-			"remote": true
-		}
-	],
 	"migrations": [
 		{
 			"tag": "v1",

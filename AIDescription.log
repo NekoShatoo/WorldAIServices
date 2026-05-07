@@ -2,14 +2,13 @@
 
 概要
 - 翻訳API: `GET /trans?{lang}={text}`
-- PromotionList 配布: 管理画面から gistfs へ `pc / android / ios` JSON をアップロード
-- 管理UI: `GET /mgr`（Web 管理画面、本体は Worker が直接返す）
-- 管理API: `/mgr/api/*`（前後分離、画面は API のみ呼び出す）
-- 永続設定/キャッシュ/統計/エラーログ/簡易レート制限: Cloudflare D1
+- 管理UI: `GET /mgr`（ログイン） / `GET /mgr/app`（AI 管理コンソール）
+- 管理API: `/mgr/api/*`
+- 永続設定/翻訳キャッシュ/統計/エラーログ/LLM要求履歴/簡易レート制限: Cloudflare D1
 - 同一翻訳キーの同時実行制御: Cloudflare Durable Object
 - 外部AI: OpenAI 互換 Chat Completions または `result` JSON 形式
 
-翻訳API仕様（既存互換）
+翻訳API仕様
 - `/trans` は Unity クライアント想定ヘッダーのみ受け付ける
 - 許可条件は `User-Agent` に `UnityPlayer` を含み、`Accept` が `*/*`、`X-Unity-Version` が空でないこと
 - 条件不一致時は 403 で `{ "status": "error", "result": "Unauthorized client" }`
@@ -19,22 +18,15 @@
 - サービス停止時は 503 で `{ "status": "error", "result": "Server is closed" }`
 - 文字数超過時は 400 で `{ "status": "error", "result": "Text too long" }`
 - 返却形式は常に `status` + `result`
+- 成功レスポンスは `Cache-Control: public, max-age=60, s-maxage=300, stale-while-revalidate=600` を返す
 
-管理Web仕様（日本語UI）
-- `GET /mgr` はログイン専用ページ
-- `GET /mgr/app` は管理コンソール本体（左右分割レイアウト）
-- 左ペインは Tree View ナビゲーションで、Dashboard が最上位、他はサービス配下
-  - AIサービス: サービス設定 / 運用操作 / AI疎通 / 説明ページ
-  - PromotionList: 項目管理 / Gist管理 / 説明ページ
-- 初期表示は Dashboard
+管理Web仕様
 - ログイン方式は「パスワードのみ」
-- パスワードは環境変数 `MGR_PASSWORD` を使用
+- パスワードは環境変数 `MGR_PASSWORD` を使用する
 - ログイン成功時、管理API呼び出し用トークン（短期）を返す
 - 管理APIは `Authorization: Bearer <token>` 必須
-- Dashboard には KPI と Chart.js ベースの統計グラフを表示
-  - 折れ線: cache hit/miss, AI success/failure（当日）
-  - 棒グラフ: 言語別リクエスト数（当日）
-- 主要機能:
+- 管理画面は AI サービス専用で、Dashboard / サービス設定 / 運用操作 / AI疎通 / 説明ページだけを持つ
+- 主要API:
   - 現在設定取得 `/mgr/api/status`
   - 設定更新 `/mgr/api/config`
   - 統計取得 `/mgr/api/stats`
@@ -43,84 +35,26 @@
   - AI疎通 `/mgr/api/ping`
   - 疑似翻訳 `/mgr/api/simulate`
   - キャッシュ全削除 `/mgr/api/resetcache`
-  - PromotionList 使用率取得 `/mgr/api/promotion/usage`
-  - PromotionList gist 状態取得 `/mgr/api/promotion/gist/status`
-  - PromotionList gist アップロード `/mgr/api/promotion/gist/upload-platform`
-  - PromotionList 一覧取得 `/mgr/api/promotion/items`
-  - PromotionList 追加 `/mgr/api/promotion/items`
-  - PromotionList 更新 `/mgr/api/promotion/items/update`
-  - PromotionList 削除 `/mgr/api/promotion/items/delete`
-  - PromotionList 順序移動 `/mgr/api/promotion/items/move`（up/down）
-  - Advertisement 使用率取得 `/mgr/api/advertisement/usage`
-  - Advertisement Scope 一覧取得 `/mgr/api/advertisement/scopes`
-  - Advertisement Scope 追加 `/mgr/api/advertisement/scopes`
-  - Advertisement Scope 更新 `/mgr/api/advertisement/scopes/update`
-  - Advertisement Scope 削除 `/mgr/api/advertisement/scopes/delete`
-  - Advertisement gist 状態取得 `/mgr/api/advertisement/gist/status`
-  - Advertisement gist アップロード `/mgr/api/advertisement/gist/upload-platform`
-  - Advertisement 一覧取得 `/mgr/api/advertisement/items`
-  - Advertisement 追加 `/mgr/api/advertisement/items`
-  - Advertisement 更新 `/mgr/api/advertisement/items/update`
-  - Advertisement 削除 `/mgr/api/advertisement/items/delete`
-  - Advertisement 並び替え `/mgr/api/advertisement/items/reorder`
-  - gist 一覧取得 `/mgr/api/gistfs/uploads`
-  - gist 削除 `/mgr/api/gistfs/uploads/delete`
-  - サービス説明取得 `/mgr/api/docs/ai` / `/mgr/api/docs/promotion`
-
-PromotionList 仕様
-- Worker の公開 `GET /PromotionList` は廃止した
-- 配布JSONは `pc / android / ios` ごとに D1 キャッシュへ保持し、管理画面から gistfs へアップロードする
-- gistfs 連携は `PUT /files/{path}/content` を使い、Worker から `ReadableStream` で本文を転送する
-- PromotionList 項目管理パネルには 3 平台の raw URL / 状態 / アップロードログを表示する
-- Gist 管理パネルでは gistfs API の `/files` を直接読んで現在の全ファイルを表示し、削除操作を提供する
-- 管理画面で画像ファイルを選択すると、フロントで Base64 化して `Image` に設定する
-- 管理画面の PromotionList は常時入力フォームを表示せず、追加/編集時のみモーダルでフォームを開く
-- PromotionList 項目管理は CRUD（一覧/追加/編集/削除）を提供する
-- 一覧取得は type を指定して 1 種類のみ表示する（Avatar か World の Selection）
-- 追加時は `ID` のみ必須。その他フィールドは空文字を許可する
-- 管理画面で上下移動すると display_order が入れ替わり、次回 gistfs へアップロードされる JSON 順にも反映される
-- JSON 全体サイズ上限は 100MB
-- 追加時はフロントで増分サイズを予測し、100MB 超過見込みなら送信前に拒否する
-- バックエンドでも上限を二重チェックし、超過時は登録を拒否する
-- 画像アップロードには「画像圧縮を有効化」オプションを追加し、既定で ON
-- MaxSize は 32/64/128/256/512/1024/2048/4096/8192 から選択可能（既定 512）
-- 圧縮 ON 時、画像の長辺が MaxSize を超える場合のみ等比縮小し、MaxSize 以下なら元サイズ維持
-- 画像変換後の Base64 は自動で `Image` フィールドへ反映する
-- 圧縮後プレビューを表示し、ボタンから拡大モーダルで確認できる
-- MaxSize が 512 を超える選択時は警告文 `512を超える画像は容量を圧迫する可能性があります。` を表示する
-
-Advertisement 仕様
-- Advertisement は PromotionList と別サービスとして扱い、`Scope` 単位で項目と gistfs 配布先を分ける
-- Scope は `ScopeKey` と `Name` を持つ
-  - `ScopeKey` は gistfs ファイル名用の固定キーで、`a-z / 0-9 / _ / -` のみ許可する
-  - `Name` は管理画面表示用で、Scope 名変更時も `ScopeKey` は維持する
-- 項目は `Title / URL / Image` のみを持つ
-- 配布ファイル名は `adv_<scopeKey>_<platform>.json`
-- gistfs への upload は同じファイル名へ更新するため、同一 ScopeKey の URL を極力固定できる
-- 項目画像のアップロード/圧縮/4倍数補正/変換前チェック/プレビュー処理は PromotionList と同じ共通関数群を再利用する
-- 変換後データは `pc / android / ios` で保持し、Scope 単位の gist 状態表示・アップロードを行う
+  - サービス説明取得 `/mgr/api/docs/ai`
 
 保存方針
-- `service_config` に稼働設定を 1 行で保持
-- `translation_cache` に翻訳結果を保持し `expires_at` で管理
-- `translation_stats` は `period_type + period_key + lang` 単位で集計
-- `error_logs` にエラー履歴を保存
-- `llm_request_logs` に上流 LLM へ送った実リクエスト履歴を保存（cache hit は記録しない）
-- `rate_limits` に 1 分窓の簡易カウンタを保存
-- `promotion_list_items` に PromotionList 項目を保存する
-  - `display_order` で各 type 内の順序を保持する
-- `promotion_list_platform_cache` / `promotion_list_platform_cache_chunks` に gistfs アップロード元の JSON キャッシュを保存する
+- `service_config` に稼働設定を 1 行で保持する
+- `translation_cache` に翻訳結果を保持し `expires_at` で管理する
+- `translation_stats` は `period_type + period_key + lang` 単位で集計する
+- `error_logs` にエラー履歴を保存する
+- `llm_request_logs` に上流 LLM へ送った実リクエスト履歴を保存する（cache hit は記録しない）
+- `rate_limits` に 1 分窓の簡易カウンタを保存する
 - D1 は TTL 自動削除が無いため、定期/都度メンテで少量削除する
 
 低コスト方針
 - キャッシュ優先、未ヒット時のみ AI 呼び出し
-- キャッシュキーは `TRANSLATION_PROMPT_VERSION + lang + text` を SHA-256 化
-- 同一キー同時実行は Durable Object で single-flight 化
+- キャッシュキーは `TRANSLATION_PROMPT_VERSION + lang + text` を SHA-256 化する
+- 同一キー同時実行は Durable Object で single-flight 化する
 - `/mgr/api/simulate` は翻訳APIと同じキャッシュ経路を使うが統計は加算しない
 - `/mgr/api/ping` は上流AIへ実リクエストするため無料ではない
 
 統計
-- 翻訳処理時に日次・月次で D1 へ保存
+- 翻訳処理時に日次・月次で D1 へ保存する
 - 日次キー: `YYYY-MM-DD`
 - 月次キー: `YYYY-MM`
 - 時刻基準: JST
@@ -140,96 +74,10 @@ Advertisement 仕様
 - runtime 変数は `wrangler.jsonc` に固定せず、Cloudflare Dashboard の Variables / Secrets を正本とする
 - `wrangler.jsonc` には Worker 固定設定、D1 binding、Durable Object binding / migration を残す
 
-今回の実装変更メモ
-- Discord 管理ルートと Discord 依存を完全撤去した
-- 管理機能は `/mgr` + `/mgr/api/*` に移行した
-- 翻訳実行ロジックは `src/translation.ts` へ分離し、`/trans` と manager simulate で共通利用する
-- 将来の複数管理ページ追加を見据え、manager API を `/mgr/api` に集約した
-- UI を 1 ページ詰め込みから 2 ページ構成へ変更した（ログイン分離 + コンソール分離）
-- PromotionList サービスを追加し、管理画面から Avatar / World 項目を追加・削除できるようにした
-
-確認済み事項
-- Cloudflare D1 の Worker API は `prepare().bind().first()` / `run()` / `batch()` を利用する
-- D1 の 1 invocation あたり query 上限はプラン依存で Free 50 / Paid 1000
-- `wrangler.jsonc` の D1 binding は `d1_databases` と `migrations_dir` を利用する
-
-- PromotionList の登録済み一覧は縦スクロール表示にし、項目数が多くても管理画面で操作できるようにした
-- Image(Base64) 入力欄はデバッグ用途としてデフォルトで折りたたみ表示にした
-- MaxSize と圧縮ON/OFF は画像アップロード欄の横に配置し、画像選択後に設定変更すると即座に再圧縮されるようにした
-
-- 圧縮後プレビューにはホバー時の虫眼鏡（局所拡大）UIを追加し、細部確認しやすくした
-
-- PromotionList の追加/更新時に進捗バーと状態テキストを表示し、送信中の体感停止を防ぐUIを追加した
-
-- PromotionList の並び替えは「並び替え編集」モードでドラッグ&ドロップ操作し、最後に一括保存する方式へ変更した
-- 並び替え保存 API として `/mgr/api/promotion/items/reorder` を追加した
-- 登録済み一覧の各項目に画像プレビュー導線を追加し、一覧から直接全画面プレビューを開けるようにした
-- 画像拡大モーダルは全画面表示で最大サイズ（object-contain）に変更した
-
-- 並び替えドラッグ中に一覧の上下端へ寄せると自動スクロールするようにし、長距離移動を可能にした
-
-- 登録済み一覧の先頭に固定サイズサムネイルを表示し、非同期デコード完了までローディングスピナーを出す方式にした
-
-- PromotionList に「API設定」ページを追加し、公開APIの Image 返却ON/OFFを管理できるようにした
-- 画像返却をOFFにした場合も JSON の `Image` フィールド自体は削除せず、空文字を返す
-- 設定変更時は公開キャッシュJSONを再生成する
-
-- 翻訳API `/trans` の成功レスポンスは `Cache-Control: public, max-age=60, s-maxage=300, stale-while-revalidate=600` を返すようにし、CDN再利用を有効化した
-- AI失敗時の `result` は詳細化し、`AI request failed: ...` / `AI request timeout (latencyMs=...)` を返すようにした（URL・Bearer・APIキー形式文字列・長い疑似シークレットはマスク）
-- PromotionList 使用率が 0 固定になる問題を修正した。原因は D1 から返る数値が文字列のとき `safeMetricNumber` が 0 扱いになる実装で、文字列数値を `Number(...)` 変換してから評価するように変更した
-- 管理画面の各種 API 呼び出しに共通ローディングオーバーレイを追加し、ログイン・Dashboard読込・設定保存・simulate・PromotionList 一覧取得/保存/削除/並び替え/API設定更新・説明文読込の待機中に必ず状態文言を表示するようにした
-- Dashboard と PromotionList 一覧、説明文エリアには局所的な読込表示も追加し、全画面オーバーレイだけでなく「どの領域が更新中か」も見えるようにした
-- 画像アップロード時は Base64 化と再圧縮の間もローディング表示を維持し、重い画像で無反応に見えないようにした
-- 管理画面の初期表示では Dashboard 用データのみ取得し、他の設定・PromotionList 一覧・説明文は対応タブを開いた時点で初回読込する遅延取得に変更した
-- 右ペインのローディングオーバーレイは `main` のみを覆う配置に変更し、左側の Tree View は常に操作可能なままにした
-- 説明ページも AI / PromotionList を別々に取得するように分離し、片方を開いただけで他方の API を呼ばないようにした
-- `src/managerAppScript.ts` を整理し、面板読込は `panelLoaders` の対応表で分配、Promotion 追加/更新は `buildPromotionSubmitRequest()` で共通化、一覧内の編集/削除/画像プレビューは個別バインドではなくイベント委譲へ変更した
-- 初期化処理は `bindNavigationEvents()` / `bindAiEvents()` / `bindPromotionEvents()` / `initializePage()` に分割し、後半のイベント登録が一塊で読みにくい状態を解消した
-- `withButtonDisabled()` / `invalidatePanels()` / `refreshPromotionManagePanel()` などの小さな共通関数を追加し、同じ disable/reload/invalidate 手順の重複を減らした
-- PromotionList 項目テーブルに `image_pc` / `image_android` / `image_ios` を追加し、管理用の原画像 `image` と分離した。原画像更新時は変換済みデータを全消去して未変換状態へ戻す
-- 各プラットフォームの変換結果には幅・高さ・texture format も保存するため、対応メタデータ列を追加した
-- 画像変換は Worker から外部 `crunch` API を順次呼び出す方式に変更した。設定は `pc: DXT1/DXT5 + crn`、`android: ETC1/ETC2 + ktx`、`ios: ETC1/ETC2 + ktx` を使用する
-- 外部変換APIの Bearer token はコードへ直書きせず `CRUNCH_API_TOKEN` 環境変数で参照する。`.dev.vars.example` にも追加した
-- 外部変換APIの URL もコード固定値をやめて `CRUNCH_API_URL` 環境変数から読むように変更した
-- 管理画面の一覧には画像がある項目だけ「変換 / 変換済み」ボタンを表示し、変換モーダル内で `pc → android → ios` の順に進行ログを追記表示するようにした
-- 変換前には画像サイズを調べ、縦横とも 4 の倍数でない場合は変換を拒否して明示的に案内するようにした
-- 編集モーダルには 4 倍数チェック結果を緑/赤の帯で常時表示し、合格なら即変換可能、不合格なら修正が必要だと一目で分かるようにした
-- 変換モーダルには「4の倍数へ拡大して保存」ボタンを追加し、現在の原画像を縦横それぞれ切り上げた最寄りの 4 倍数サイズへ引き伸ばして保存できるようにした
-- 管理画面の一覧APIは軽量化し、一覧取得時には原画像Base64を返さないように変更した。画像有無は `HasImage` のみ返し、編集または変換開始時にだけ `/mgr/api/promotion/items/detail?id=...` で原画像を取得する
-- 一覧の縮略図デコードも廃止し、一覧表示を高速化した。Avatar / World どちらも同じ軽量取得パスを使う
-- PromotionList 使用率は合計1本ではなく `pc` / `android` / `ios` の3本に分けて表示するように変更した。バックエンドもキャッシュJSONから各プラットフォームのバイト数を個別算出して返す
-- 変換モーダルでは自動検出した透明有無を初期値にしつつ、チェックボックスで「透明ありとして変換する」を手動上書きできるようにした
-- 変換モーダルには各プラットフォームで使うエンコーダー設定を読み取り専用テキストで表示し、透明設定の切り替えに応じて即時更新する
-- 変換モーダルには「変換データを清空」ボタンも追加し、現在の項目の `pc/android/ios` 変換済みデータだけを削除できるようにした。原画像は保持する
-- 追加/編集モーダルと変換モーダルには `max-height` + `overflow-y: auto` を付け、画面高を超えてもモーダル内部だけ縦スクロールするようにした
-- 変換モーダルでは変換済みプラットフォームだけダウンロードボタンを表示し、`/mgr/api/promotion/items/download?id=...&platform=...` から Base64 化前の生バイナリ（pc は `.crn`、android/ios は `.ktx`）を直接保存できるようにした
-- PromotionList の公開キャッシュは 1 個の bundle JSON ではなく `pc / android / ios` の独立キャッシュへ分割した。単一プラットフォーム変換時は対象プラットフォーム分だけ再生成し、他プラットフォームの巨大 Base64 JSON を毎回再構築しない
-- PromotionList 使用率はキャッシュ本文の `JSON.parse` / `JSON.stringify` で再計算せず、プラットフォーム別キャッシュメタデータの `payload_bytes` を直接読むように変更した
-- 互換性のため、分割キャッシュ未生成時は旧 `promotion_list_cache_chunks` の bundle JSON を一時的に参照するフォールバックも残した。新 migration 適用後に一度更新処理が走れば以後は分割キャッシュ側のみで動作する
-- PromotionList の配布は Worker 直配信をやめ、gistfs へ `PromotionList.pc.json` / `PromotionList.android.json` / `PromotionList.ios.json` を順次アップロードする方式へ変更した。gistfs 側は同一ファイル名へ更新するため raw URL を極力固定できる
-- gistfs 接続は Cloudflare Workers VPC Service binding `VPC_SERVICE` を使う。Worker からは `env.VPC_SERVICE.fetch("http://localhost/...")` で呼び出し、実際の接続先 host/port は VPC Service 側設定に委ねる
-- gistfs への upload は `PUT /files/{path}/content` を使い、`env.VPC_SERVICE.fetch(...)` の body に `ReadableStream` を渡してメモリ負荷を抑える構成にした
-- Gist 管理面板は D1 を見ず gistfs API から直接一覧取得するため、削除や外部更新があっても PromotionList 面板の gist 状態と同期ズレしにくい。なお gistfs API には `updated_at` が無いため、厳密な最終更新日時は UI 上で「gistfs API 未提供」と表示する
-- 管理画面のクライアントスクリプト `src/managerAppScript.ts` は 2300 行超まで肥大化したため、文字列結合の形を保ったまま `src/managerAppScriptParts/` 配下へ `core / promotion / advertisement / lifecycle / bindings` の 5 分割に整理した。挙動変更ではなく配置整理を優先し、HTML 側の script 埋め込み方法は変えていない
-- 管理画面 UI は将来の管理対象追加に備えて `src/managerAppPageParts/` へ分割した。`managerAppPage.ts` は shell 組み立てだけにし、AI / PromotionList / Advertisement / Gist / Modal / 共通部品を別ファイルへ分けた
-- UI 見た目は運用管理向けの軽量な構成へ変更した。固定サイドバー・薄い surface・低い影・小さめの角丸を維持しつつ、テーマカラーは紫系へ戻した。サイドバーの通常ボタンは濃紫背景に淡紫文字、選択中は白背景に紫文字で明確に判別できるようにした
-- Tailwind CDN への依存をやめ、管理画面で実際に使う utility だけを `MANAGER_COMMON_STYLE` 内に持つ方式へ変更した。外部依存はグラフ表示用の Chart.js のみに残している
-- PromotionList / Advertisement の gistfs 状態取得は管理画面全体の loading overlay を出さず、Gistfs 配布セクション内の status list だけを局所 loading 表示にした
-- Advertisement 面板の初回表示と Scope 切替では、Scope / 使用率 / 一覧の読み込みを先に完了させ、gistfs 状態取得は待たずにバックグラウンドで更新するようにした。Gistfs 配布セクションだけが局所 loading になる
-- PromotionList 面板の初回表示も、使用率 / 一覧の読み込みを先に完了させ、gistfs 状態取得は待たずにバックグラウンドで更新するようにした。Gistfs 配布セクションだけが局所 loading になる
-- Advertisement 追加/更新 modal は送信成功後に submit/cancel/close ボタンの disabled 状態を必ず解除するようにした。成功時に `closeAdvertisementModal()` だけで閉じると次回 open 時にボタンが灰色のまま残る問題を修正した
-- Advertisement 項目には任意の `Group` 文字列を追加した。管理画面では `grp_...` のような任意値を入力でき、DB では `advertisement_items.group_name` に保存し、gistfs 用 JSON では各 item に `Group` を空文字込みで出力する
-- 非AIデータ移行用に `/mgr/api/migration/export` と `/mgr/api/migration/import` を追加した。対象は PromotionList / Advertisement の item・scope・image chunk・platform cache・Promotion API 設定で、翻訳キャッシュ・統計・AI設定は含めない
-- 移行 JSON の import は置き換え方式で、PromotionList / Advertisement 関連テーブルを削除してから JSON 内容を挿入する。画像 Base64 は chunk 表の内容をそのまま保持するため、原画像と pc/android/ios 変換済みデータも移行対象になる
-- 管理画面の PromotionList / Advertisement 項目管理に「データ移行」セクションを追加し、同じ移行 JSON を export / import できるようにした
-- PromotionList 追加/更新 modal も送信処理を `finally` で囲み、通信例外や更新途中の例外でも submit/cancel/close ボタンが disabled のまま残らないようにした
-- Dashboard 初期読込は `/stats` や使用率 API の戻り値が欠けていても JS 例外で管理画面全体が止まらないようにした。chart と使用率表示は欠損時に 0 扱いで描画する
-- ログイン画面も同じ `MANAGER_COMMON_STYLE` の visual system に合わせ、入口と管理画面で見た目が分裂しないようにした
-- PromotionList 説明ページへ gistfs 配布 JSON の実ファイル名、トップレベル構造、項目フィールド、最小例を追加した。内容は現在の `buildPromotionPayloadBundleFromItems()` が生成する platform 別 payload に合わせている
-- Advertisement 説明ページを追加し、Scope ごとの gistfs ファイル名、トップレベル構造、項目フィールド、最小例を記載した。JSON 内容は Scope 情報を含めず、現在の `buildAdvertisementPayloadsForScopes()` が生成する `AdvertisementExportItem[]`（Title / Link / Image / ImageWidth / ImageHeight / ImageTextureFormat）に合わせている
-- D1 は 1 つの文字列/BLOB/行に 2MB 上限があるため、画像 Base64 を item テーブルの `image` / `image_pc` / `image_android` / `image_ios` に直接保存すると 2048px 級の画像で `SQLITE_TOOBIG` が発生する。PromotionList / Advertisement の原画像と変換済み platform 画像は `promotion_list_item_image_chunks` / `advertisement_item_image_chunks` へ 1.5MB 以下のチャンクで保存し、既存 image 列は旧データ互換 fallback としてのみ参照する構成へ変更した
-- image chunk migration は `0005_item_image_chunks.sql` でテーブル作成、`0006_move_item_images_to_chunks.sql` で既存 image 列から chunk 表へ移行する 2 段構成にした。D1 実行途中で失敗した場合に「表作成」と「データ移動」のどちらで失敗したか分かりやすくするため
-- 既存 migration SQL は手動適用済み前提のため、増分 SQL を削除して `migrations/0001_schema_baseline.sql` へ統合した
-- baseline は最終スキーマだけを `CREATE TABLE IF NOT EXISTS` / `CREATE INDEX IF NOT EXISTS` / `INSERT OR IGNORE` で表現し、PromotionList / Advertisement / image chunk / platform cache を新規環境で 1 ファイル構築できるようにした。廃止済みの `gistfs_uploaded_files` は含めない
-- `wrangler.jsonc` の `migrations_dir` は再び `migrations` を使う構成へ戻した
-- 今回の `npx tsc --noEmit` では既存の `src/types.ts` の Durable Object 型エラー（`TranslationCoordinator` が `DurableObjectBranded` 制約を満たさない）が残っており、この変更起因の新規エラーは確認されなかった
+今回の整理
+- PromotionList / Advertisement / Gistfs / crunch / 非AI移行API は Worker から撤去した
+- 非AIサービスはローカル `WorldService` 側へ移管済み
+- Worker の管理画面は AI サービス専用に戻した
+- D1 baseline migration は AI 用テーブルだけに縮小した
+- 旧D1に残る非AIテーブルは `0002_cleanup_removed_non_ai_tables.sql` で削除する
+- `VPC_SERVICE` binding と `CRUNCH_API_*` 環境変数を Worker 側から削除した

@@ -1,15 +1,12 @@
 export interface Env {
 	STATE_DB: D1Database;
 	TRANSLATION_COORDINATOR: DurableObjectNamespace<import('./coordinator').TranslationCoordinator>;
-	VPC_SERVICE?: Fetcher;
 	MGR_PASSWORD: string;
 	AI_PROVIDER_MODE?: string;
 	AI_TIMEOUT_MS?: string;
 	AI_API_URL: string;
 	AI_API_KEY: string;
 	AI_MODEL?: string;
-	CRUNCH_API_URL: string;
-	CRUNCH_API_TOKEN: string;
 }
 
 export interface ServiceConfig {
@@ -99,108 +96,4 @@ export interface TranslationStatsRecord {
 export interface TranslationStatsSummary {
 	day: TranslationStatsRecord;
 	month: TranslationStatsRecord;
-}
-
-export type PromotionItemType = 'Avatar' | 'World';
-export type PromotionPlatform = 'pc' | 'android' | 'ios';
-export type AdvertisementPlatform = PromotionPlatform;
-
-export interface PromotionItem {
-	ID: string;
-	Title: string;
-	Anchor: string;
-	Description: string;
-	Link: string;
-	Image: string;
-	ImageWidth?: number;
-	ImageHeight?: number;
-	ImageTextureFormat?: string;
-	Type?: PromotionItemType;
-	UpdatedAt?: string;
-	DisplayOrder?: number;
-	ConvertedPlatforms?: PromotionPlatform[];
-	IsImageConverted?: boolean;
-	HasImage?: boolean;
-}
-
-export interface PromotionPayload {
-	Avatar: PromotionItem[];
-	World: PromotionItem[];
-}
-
-export interface PromotionPlatformPayloadBundle {
-	pc: PromotionPayload;
-	android: PromotionPayload;
-	ios: PromotionPayload;
-}
-
-export interface AdvertisementScope {
-	ID: string;
-	ScopeKey: string;
-	Name: string;
-	UpdatedAt?: string;
-}
-
-export interface AdvertisementItem {
-	ID: string;
-	ScopeID?: string;
-	Title: string;
-	Group?: string;
-	URL: string;
-	Image: string;
-	ImageWidth?: number;
-	ImageHeight?: number;
-	ImageTextureFormat?: string;
-	UpdatedAt?: string;
-	DisplayOrder?: number;
-	ConvertedPlatforms?: AdvertisementPlatform[];
-	IsImageConverted?: boolean;
-	HasImage?: boolean;
-}
-
-export interface AdvertisementExportItem {
-	Title: string;
-	Group: string;
-	Link: string;
-	Image: string;
-	ImageWidth: number;
-	ImageHeight: number;
-	ImageTextureFormat: string;
-}
-
-export interface AdvertisementPlatformPayloadBundle {
-	pc: AdvertisementExportItem[];
-	android: AdvertisementExportItem[];
-	ios: AdvertisementExportItem[];
-}
-
-export interface GistfsFileMetadata {
-	path: string;
-	size: number;
-	sha256: string;
-	rawUrl: string;
-	mimeType: string;
-	uploadedAt: string;
-	sourceKey: string;
-	platform: PromotionPlatform | '';
-}
-
-export interface NonAiMigrationData {
-	schemaVersion: 1;
-	exportedAt: string;
-	source: 'WorldAIServices';
-	promotion: {
-		apiConfig: any[];
-		items: any[];
-		imageChunks: any[];
-		platformCache: any[];
-		platformCacheChunks: any[];
-	};
-	advertisement: {
-		scopes: any[];
-		items: any[];
-		imageChunks: any[];
-		platformCache: any[];
-		platformCacheChunks: any[];
-	};
 }

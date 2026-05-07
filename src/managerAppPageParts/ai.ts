@@ -2,19 +2,19 @@ import { buildPanelHeader } from './shared';
 
 export function buildDashboardPanel() {
 	return `<section id="panel-dashboard" class="panel">
-  ${buildPanelHeader('Dashboard', 'AI サービスと配布データの状態を確認します。', '<button id="refreshDashboardButton" class="btn btn-soft">更新</button>')}
+  ${buildPanelHeader('Dashboard', 'AI 翻訳サービスの状態を確認します。', '<button id="refreshDashboardButton" class="btn btn-soft">更新</button>')}
   <p id="dashboardLoadingText" class="hidden mt-3 text-xs text-[color:var(--mgr-muted)]">Dashboard を読み込み中...</p>
   <div class="section-stack">
     <div class="metric-grid">
       <div class="surface metric"><p class="metric-label">AI サービス状態</p><p id="kpiEnabled" class="metric-value">-</p></div>
       <div class="surface metric"><p class="metric-label">1分上限</p><p id="kpiRpm" class="metric-value">-</p></div>
       <div class="surface metric"><p class="metric-label">最大文字数</p><p id="kpiMaxChars" class="metric-value">-</p></div>
-      <div class="surface metric"><p class="metric-label">PromotionList 使用率</p><p id="kpiPromotionUsage" class="metric-value">-</p></div>
+      <div class="surface metric"><p class="metric-label">本日リクエスト</p><p id="kpiRequestsToday" class="metric-value">-</p></div>
     </div>
-    <div class="two-column">
-      <section class="surface"><h3 class="text-sm font-semibold mb-2">キャッシュ / AI 統計（当日）</h3><canvas id="dayChart" height="220"></canvas></section>
-      <section class="surface"><h3 class="text-sm font-semibold mb-2">言語別リクエスト（当日）</h3><canvas id="langChart" height="220"></canvas></section>
-    </div>
+    <section class="surface">
+      <h3 class="text-sm font-semibold mb-2">統計サマリー</h3>
+      <pre id="statsSummaryText" class="text-xs whitespace-pre-wrap break-all text-[color:var(--mgr-text)]"></pre>
+    </section>
   </div>
 </section>`;
 }
@@ -67,13 +67,5 @@ export function buildDocsPanels() {
 	return `<section id="panel-docs-ai" class="panel hidden">
   ${buildPanelHeader('AIサービス 説明ページ', '現在の管理 API 仕様を確認します。')}
   <div id="docsAiBody" class="surface mt-3 text-sm space-y-1 text-[color:var(--mgr-text)]"></div>
-</section>
-<section id="panel-docs-promotion" class="panel hidden">
-  ${buildPanelHeader('PromotionList 説明ページ', 'PromotionList の管理仕様を確認します。')}
-  <div id="docsPromotionBody" class="surface mt-3 text-sm space-y-1 text-[color:var(--mgr-text)]"></div>
-</section>
-<section id="panel-docs-advertisement" class="panel hidden">
-  ${buildPanelHeader('Advertisement 説明ページ', 'Advertisement の Scope と gistfs JSON 仕様を確認します。')}
-  <div id="docsAdvertisementBody" class="surface mt-3 text-sm space-y-1 text-[color:var(--mgr-text)]"></div>
 </section>`;
 }
