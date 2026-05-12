@@ -18,6 +18,9 @@
 - サービス停止時は 503 で `{ "status": "error", "result": "Server is closed" }`
 - 文字数超過時は 400 で `{ "status": "error", "result": "Text too long" }`
 - 返却形式は常に `status` + `result`
+- AI上流がHTTPエラーを返した場合、翻訳APIは可能な限り上流のHTTPステータスコードをそのまま返し、`result` には上流レスポンス本文を機密情報除去後に入れる
+- AI上流が成功HTTPでも `result` 欠落・JSON不正など翻訳結果として扱えない場合は 502 を返し、`result` には受け取った本文または判定理由を入れる
+- Worker側でAI要求がタイムアウトした場合は、上流HTTPステータスが存在しないため 504 を返す
 - 成功レスポンスは `Cache-Control: public, max-age=60, s-maxage=300, stale-while-revalidate=600` を返す
 
 管理Web仕様

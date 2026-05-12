@@ -49,7 +49,7 @@ export async function requestAiTranslation(
 			if (!result) throw new Error('openai_content_missing');
 		} else {
 			const response = await fetchResultJsonProvider(env, controller.signal, promptText, text);
-			if (!response.ok) throw new Error(response.reason);
+			if (!response.ok) throw buildAiProviderError(response.reason, response.publicReason, response.statusCode);
 			result = response.result!;
 		}
 
@@ -80,7 +80,7 @@ export async function requestAiTranslation(
 			await logPromise;
 		}
 
-		return { ...failed, statusCode: 502, source: 'ai' as const };
+		return { ...failed, source: 'ai' as const };
 	} finally {
 		clearTimeout(timerId);
 	}
@@ -90,6 +90,7 @@ function buildAiFailureResponse(error: any, latencyMs: number) {
 	if (error === 'timeout' || (error instanceof Error && error.name === 'AbortError') || String(error).toLowerCase().includes('timeout')) {
 		return {
 			ok: false as const,
+			statusCode: 504,
 			reason: 'timeout',
 			publicReason: `AI request timeout (latencyMs=${latencyMs})`,
 			latencyMs,
@@ -97,13 +98,42 @@ function buildAiFailureResponse(error: any, latencyMs: number) {
 	}
 
 	const reason = error instanceof Error ? error.message : String(error);
-	const sanitizedReason = sanitizePublicErrorText(reason);
+	const statusCode = normalizeErrorStatusCode(error);
+	const publicErrorText = extractPublicErrorText(error, reason);
 	return {
 		ok: false as const,
+		statusCode,
 		reason,
-		publicReason: `AI request failed: ${sanitizedReason}`,
+		publicReason: publicErrorText,
 		latencyMs,
 	};
+}
+
+function buildAiProviderError(reason: string, publicReason: string, statusCode: number) {
+	const error = new Error(reason);
+	return Object.assign(error, { publicReason, statusCode });
+}
+
+function normalizeErrorStatusCode(error: any) {
+	const statusCode = normalizeHttpErrorStatusCode(error?.statusCode ?? error?.status);
+	return statusCode ?? 502;
+}
+
+function normalizeHttpErrorStatusCode(value: any) {
+	const statusCode = Number(value);
+	if (!Number.isInteger(statusCode) || statusCode < 400 || statusCode > 599) return null;
+	return statusCode;
+}
+
+function extractPublicErrorText(error: any, fallback: string) {
+	const directPublicReason = typeof error?.publicReason === 'string' ? error.publicReason : '';
+	if (directPublicReason.trim().length > 0) return sanitizePublicErrorText(directPublicReason);
+
+	const providerError = error?.error;
+	if (typeof providerError === 'string' && providerError.trim().length > 0) return sanitizePublicErrorText(providerError);
+	if (providerError && typeof providerError === 'object') return sanitizePublicErrorText(JSON.stringify(providerError));
+
+	return sanitizePublicErrorText(fallback);
 }
 
 function sanitizePublicErrorText(value: string) {
@@ -113,7 +143,7 @@ function sanitizePublicErrorText(value: string) {
 		.replace(/(Bearer\s+)[A-Za-z0-9._-]+/gi, '$1[redacted-token]')
 		.replace(/\bsk-[A-Za-z0-9_-]+\b/g, '[redacted-key]')
 		.replace(/\b[A-Za-z0-9_-]{24,}\b/g, (token) => (looksSensitiveToken(token) ? '[redacted-secret]' : token))
-		.slice(0, 220);
+		.slice(0, 2000);
 }
 
 function looksSensitiveToken(token: string) {
@@ -151,21 +181,36 @@ async function fetchResultJsonProvider(env: Env, signal: AbortSignal, prompt: st
 			input,
 		}),
 	});
+	const responseText = await response.text();
+	const upstreamStatusCode = normalizeHttpErrorStatusCode(response.status) ?? 502;
 
 	if (!response.ok) {
 		return {
 			ok: false,
+			statusCode: upstreamStatusCode,
 			reason: `upstream_status_${response.status}`,
-			publicReason: `AI upstream status ${response.status}`,
+			publicReason: buildUpstreamErrorText(responseText, response.statusText, `upstream_status_${response.status}`),
 		};
 	}
 
-	const payload: any = await response.json();
+	let payload: any;
+	try {
+		payload = JSON.parse(responseText);
+	} catch {
+		return {
+			ok: false,
+			statusCode: 502,
+			reason: 'upstream_json_parse_failed',
+			publicReason: buildUpstreamErrorText(responseText, response.statusText, 'upstream_json_parse_failed'),
+		};
+	}
+
 	if (!payload || typeof payload.result !== 'string') {
 		return {
 			ok: false,
+			statusCode: 502,
 			reason: 'upstream_result_missing',
-			publicReason: 'AI result missing',
+			publicReason: buildUpstreamErrorText(responseText, response.statusText, 'upstream_result_missing'),
 		};
 	}
 
@@ -173,4 +218,9 @@ async function fetchResultJsonProvider(env: Env, signal: AbortSignal, prompt: st
 		ok: true,
 		result: payload.result,
 	};
+}
+
+function buildUpstreamErrorText(responseText: string, statusText: string, fallback: string) {
+	const sourceText = responseText.trim().length > 0 ? responseText : statusText.trim().length > 0 ? statusText : fallback;
+	return sanitizePublicErrorText(sourceText);
 }

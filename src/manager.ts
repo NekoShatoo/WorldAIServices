@@ -117,7 +117,7 @@ export async function handleManagerApi(request: Request, env: Env, ctx: Executio
 			{ source: 'manager-ping', promptVersion: TRANSLATION_PROMPT_VERSION },
 			ctx.waitUntil.bind(ctx)
 		);
-		if (!pingResult.ok) return jsonResponse({ status: 'error', result: pingResult.publicReason }, 502);
+		if (!pingResult.ok) return jsonResponse({ status: 'error', result: pingResult.publicReason }, pingResult.statusCode);
 		return jsonResponse({ status: 'ok', result: { latencyMs: pingResult.latencyMs, preview: pingResult.result } });
 	}
 

@@ -72,7 +72,7 @@ export class TranslationCoordinator extends DurableObject<Env> {
 			console.error(`[Coordinator] AI request failed: ${aiResult.reason}`);
 			return {
 				ok: false,
-				statusCode: 502,
+				statusCode: aiResult.statusCode,
 				source: 'ai',
 				latencyMs: aiResult.latencyMs,
 				publicReason: aiResult.publicReason,
