@@ -7,6 +7,24 @@
 	"name": "vrc-world-ai-services",
 	"main": "src/index.ts",
 	"compatibility_date": "2026-04-05",
+	"routes": [
+		{
+			"pattern": "api.25-ji.com",
+			"zone_name": "25-ji.com"
+		},
+		{
+			"pattern": "api.25-ji.com/health",
+			"zone_name": "25-ji.com"
+		},
+		{
+			"pattern": "api.25-ji.com/trans",
+			"zone_name": "25-ji.com"
+		},
+		{
+			"pattern": "api.25-ji.com/mgr*",
+			"zone_name": "25-ji.com"
+		}
+	],
 	"observability": {
 		"enabled": true
 	},
