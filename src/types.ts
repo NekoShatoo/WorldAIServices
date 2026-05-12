@@ -7,6 +7,7 @@ export interface Env {
 	AI_API_URL: string;
 	AI_API_KEY: string;
 	AI_MODEL?: string;
+	OPENROUTER_PROVIDER_ORDER?: string;
 }
 
 export interface ServiceConfig {

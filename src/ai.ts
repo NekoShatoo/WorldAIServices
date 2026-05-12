@@ -37,11 +37,13 @@ export async function requestAiTranslation(
 		if (mode === 'openai-chat') {
 			if (!env.AI_MODEL) throw new Error('AI_MODEL missing');
 			const openai = new OpenAI({ apiKey: env.AI_API_KEY, baseURL: env.AI_API_URL });
+			const provider = buildOpenRouterProviderPreferences(env);
 			const response = await openai.chat.completions.create(
 				{
 					model: env.AI_MODEL,
 					messages: messages as any,
 					temperature: 0,
+					...(provider ? { provider } : {}),
 				},
 				{ signal: controller.signal }
 			);
@@ -83,6 +85,32 @@ export async function requestAiTranslation(
 		return { ...failed, source: 'ai' as const };
 	} finally {
 		clearTimeout(timerId);
+	}
+}
+
+function buildOpenRouterProviderPreferences(env: Env) {
+	const order = parseCommaSeparatedList(env.OPENROUTER_PROVIDER_ORDER);
+	if (order.length === 0 && !isOpenRouterApiUrl(env.AI_API_URL)) return null;
+
+	return {
+		sort: 'latency',
+		...(order.length > 0 ? { order } : {}),
+	};
+}
+
+function parseCommaSeparatedList(value: any) {
+	if (typeof value !== 'string') return [];
+	return value
+		.split(',')
+		.map((entry) => entry.trim())
+		.filter((entry) => entry.length > 0);
+}
+
+function isOpenRouterApiUrl(value: string) {
+	try {
+		return new URL(value).hostname.toLowerCase().endsWith('openrouter.ai');
+	} catch {
+		return value.toLowerCase().includes('openrouter.ai');
 	}
 }
 

@@ -69,6 +69,7 @@
   - `AI_TIMEOUT_MS`
   - `AI_API_URL`
   - `AI_MODEL`
+  - `OPENROUTER_PROVIDER_ORDER`
   - `MGR_PASSWORD`
 - Secrets
   - `AI_API_KEY`
@@ -76,6 +77,8 @@
 設定方針
 - runtime 変数は `wrangler.jsonc` に固定せず、Cloudflare Dashboard の Variables / Secrets を正本とする
 - `wrangler.jsonc` には Worker 固定設定、D1 binding、Durable Object binding / migration を残す
+- OpenRouter の Chat Completions を使う場合、`provider.sort` は `latency` を指定して低遅延プロバイダーを優先する
+- `OPENROUTER_PROVIDER_ORDER` は OpenRouter の `provider.order` 用で、カンマ区切りの provider slug を指定する。空なら `order` は送らない
 
 今回の整理
 - PromotionList / Advertisement / Gistfs / crunch / 非AI移行API は Worker から撤去した
