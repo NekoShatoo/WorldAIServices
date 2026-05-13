@@ -13,7 +13,7 @@
 			"zone_name": "25-ji.com"
 		},
 		{
-			"pattern": "api.25-ji.com/trans",
+			"pattern": "api.25-ji.com/trans*",
 			"zone_name": "25-ji.com"
 		},
 		{

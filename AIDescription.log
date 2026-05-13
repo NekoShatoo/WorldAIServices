@@ -77,7 +77,7 @@
 設定方針
 - runtime 変数は `wrangler.jsonc` に固定せず、Cloudflare Dashboard の Variables / Secrets を正本とする
 - `wrangler.jsonc` には Worker 固定設定、D1 binding、Durable Object binding / migration を残す
-- Worker Route は `api.25-ji.com/*` の全面割り当てではなく、`/health`、`/trans`、`/mgr*` のみに限定してスキャン系パスを Worker 実行前に外す
+- Worker Route は `api.25-ji.com/*` の全面割り当てではなく、`/health`、`/trans*`、`/mgr*` のみに限定してスキャン系パスを Worker 実行前に外す
 - OpenRouter の Chat Completions を使う場合、`provider.sort` は `latency` を指定して低遅延プロバイダーを優先する
 - `OPENROUTER_PROVIDER_ORDER` は OpenRouter の `provider.order` 用で、カンマ区切りの provider slug を指定する。空なら `order` は送らない
 
